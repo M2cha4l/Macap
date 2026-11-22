@@ -66,10 +66,14 @@ if [[ "${CLEAN_DIST_BUILD:-0}" == "1" ]]; then
 else
     ID=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/{print $2; exit}')
     SIGN_ID="${ID:--}"
+    # An ad-hoc signature identifies the app by its hash, which changes on every build, so macOS asks for
+    # camera and microphone again. Name the bundle id as the requirement so a rebuild keeps the permission.
+    REQ=()
+    [[ "$SIGN_ID" == "-" ]] && REQ=(--requirements '=designated => identifier "io.captureinterp.app"')
     if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
         codesign --force --sign "$SIGN_ID" --timestamp=none "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
     fi
-    codesign --force --sign "$SIGN_ID" --timestamp=none "$APP"
+    codesign --force --sign "$SIGN_ID" --timestamp=none ${REQ[@]+"${REQ[@]}"} "$APP"
 fi
 
 echo "built $APP"

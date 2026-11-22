@@ -3047,14 +3047,18 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     /// Stops every frame source and waits for the frame in flight. exit() destroys MPS's global
     /// buffer-cache mutex, so a RIFE encode still running on another thread then aborts the process.
-    func shutdown() {
+    /// False when a frame is still on the GPU after the wait: the first frame of a mode compiles its graph and can take
+    /// several seconds, and exit() would then destroy MPS state under it.
+    @discardableResult
+    func shutdown() -> Bool {
         stopLock.lock(); stopRequested = true; stopLock.unlock()
         reconnectTimer?.invalidate(); reconnectTimer = nil
         rawCapture?.stop(); rawCapture = nil
         clearAVSession()
         let drained = DispatchSemaphore(value: 0)
         queue.async { drained.signal() }
-        if drained.wait(timeout: .now() + 2) == .timedOut { Log.shared.line("shutdown: frame queue still busy after 2 s") }
+        if drained.wait(timeout: .now() + 5) == .timedOut { Log.shared.line("shutdown: frame queue still busy after 5 s"); return false }
+        return true
     }
 
     func start() -> Bool {
@@ -4551,7 +4555,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        pipeline.shutdown()
+        window?.orderOut(nil)
+        // A benchmark or an unfinished frame still encodes on the GPU. exit() runs the C++ destructors that tear down
+        // MPS while that thread uses it (SIGABRT), so leave without them.
+        if !pipeline.shutdown() || runningBenchmark {
+            Log.shared.line("quit while the GPU is busy: skipping exit handlers")
+            Log.shared.flush()
+            UserDefaults.standard.synchronize()
+            _exit(0)
+        }
     }
 
     @objc func refreshTick(_ link: CADisplayLink) {
