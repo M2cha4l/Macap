@@ -3029,10 +3029,20 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         scheduleReconnectLoop()
     }
 
+    private let stopLock = NSLock()
+    private var stopRequested = false
+    private var isStopping: Bool { stopLock.lock(); defer { stopLock.unlock() }; return stopRequested }
+
+    /// Stops every frame source and waits for the frame in flight. exit() destroys MPS's global
+    /// buffer-cache mutex, so a RIFE encode still running on another thread then aborts the process.
     func shutdown() {
+        stopLock.lock(); stopRequested = true; stopLock.unlock()
         reconnectTimer?.invalidate(); reconnectTimer = nil
         rawCapture?.stop(); rawCapture = nil
         clearAVSession()
+        let drained = DispatchSemaphore(value: 0)
+        queue.async { drained.signal() }
+        if drained.wait(timeout: .now() + 2) == .timedOut { Log.shared.line("shutdown: frame queue still busy after 2 s") }
     }
 
     func start() -> Bool {
@@ -3384,8 +3394,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         queue.async {
             var next = CMTimeGetSeconds(hostNow()) + 0.5
-            while true {
-                ready.wait()
+            while !self.isStopping {
+                if ready.wait(timeout: .now() + 0.2) == .timedOut { continue }
                 lock.lock(); let pb = pending.removeFirst(); lock.unlock()
                 let wait = next - CMTimeGetSeconds(hostNow())
                 if wait > 0 { usleep(useconds_t(wait * 1_000_000)) }
@@ -3623,6 +3633,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 
     private func handle(_ pb: CVPixelBuffer, pts: CMTime, arrival: CMTime) {
+        if isStopping { return }
         applyPendingMode()
         frames += 1
         deliveryMs.append(ms(CMTimeSubtract(arrival, pts)))
