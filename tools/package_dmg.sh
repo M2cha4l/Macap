@@ -72,52 +72,42 @@ mkdir -p "$STAGE_DIR" "$DIST_DIR"
 cp -R "$APP_PATH" "$STAGE_DIR/Maccap.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 
-cat > "$STAGE_DIR/使用说明（PS5必读）.txt" <<'TXT'
+cat > "$STAGE_DIR/使用说明 README.txt" <<'TXT'
 Maccap v1.0.0
-适用电脑：搭载 Apple Silicon（M1 / M2 / M3 / M4 / M5 全系芯片）的 Mac，系统 macOS 14.0 或更新（不支持老款 Intel Mac）
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【一、安装与首次打开】
-1. 把「Maccap.app」拖进右侧「Applications（应用程序）」文件夹。
-2. 首次打开若提示“未验证开发者”：
-   - 在「应用程序」中按住 Control 键（或点鼠标右键）点击 Maccap.app → 选择「打开」；
-   - 若系统仍拦截，打开「系统设置 → 隐私与安全性」，拉到底部点击「仍要打开」（仅首次需要）。
-3. 首次运行请允许「摄像头」和「麦克风」权限（免驱 HDMI 采集卡在 macOS 中识别为外接摄像头与麦克风）。
+需要 Apple Silicon Mac（M1 到 M5），macOS 14 或更新。
+Requires an Apple Silicon Mac (M1 to M5) with macOS 14 or later.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【二、PS5 主机端必改设置（避免黑屏或偏色）】
-1. 关闭 HDCP（系统 → HDMI → 启用 HDCP：关，不关会黑屏）
-2. 关闭 HDR、关闭 VRR、关闭 120Hz 输出
-3. 分辨率设为 2160p（4K）或 1080p，60Hz
-4. 声音输出设为「2 声道线性 PCM（Linear PCM）」
+安装
+1. 把 Maccap.app 拖进 Applications。
+2. 如果系统说无法验证开发者：按住 Control 点 Maccap.app，选「打开」。
+3. 允许摄像头和麦克风权限。
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【三、我的苹果电脑带得动哪一档？（3 秒一键实测）】
-★ 最准方法：打开软件后【点鼠标右键】或按【B 键】，点击第一项：
-  「⚡ 一键测算本机接 PS5 推荐档位 (B)…」
-  程序会花 3 秒实测你这台电脑跑 4K / 2K / 1080p 的真实耗时，弹窗直接给出最佳档位并支持一键应用！
+PS5 设置
+1. 关闭 HDCP（系统 › HDMI）。不关会黑屏。
+2. 关闭 HDR、VRR 和 120Hz 输出。
+3. 分辨率设为 2160p 或 1080p，60Hz。
+4. 声音输出设为 2 声道线性 PCM。
 
-机型速查参考（除 M5 Max 40 核显卡为实测外，其余按显卡规模比例换算·推算未核实，以软件内按 B 键实测为准）：
-· M4 Max / M5 Max / Ultra（32–80核显卡）：4K 原生 ＋ [5] 显卡·画质好（或 [6] 4.5档低延迟）
-· M1 Max / M2 Max / M3 Max（24–40核显卡）：4K 原生 ＋ [6] 显卡·均衡 4.5 档（重场景可切 4K [4] 或 2K [5]）
-· M4 Pro / M5 Pro（16–20核显卡）        ：4K 原生 ＋ [4] 延迟低，或 限制 2K ＋ [6] 均衡 4.5 档
-· M1 Pro / M2 Pro / M3 Pro（14–19核显卡）：限制 2K ＋ [6] 均衡 4.5 档
-· M3 / M4 / M5 基础版（带风扇 Mac mini 等）：限制 2K ＋ [4] 延迟低，或 限制 1080p ＋ [6] 均衡 4.5 档
-· M1 / M2 基础版 & 全系 MacBook Air（无风扇）：限制 1080p ＋ [6] 均衡 4.5 档 / [4] 延迟低（防长玩发热降频）
+选档
+按 B 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置。
 
-（换算底数参考：M5 Max 40核实测 4K 耗时 6.0 / 11.1 / 23.3 毫秒；降到 2K 耗时直接砍半还多，降到 1080p 耗时只剩不到 1/4。单张 ≤ 25.5 毫秒即可稳跑 60 帧不掉帧。）
+按键
+P 菜单 · F 全屏 · B 测速 · 1/4/6/5 直通/快速/均衡/画质 · X MetalFX · K 锐化 · H 状态条 · Q 退出
+语言：菜单 › 语言 / Language
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【四、图形控制面板与常用快捷键】
-- 打开软件默认以桌面窗口启动，中央直接显示可视化控制面板（连接 PS5 采集卡后自动收起进入画面）
-- P 键 / 右上角按钮：随时打开或收起图形控制面板（所有设置自动记忆）
-- F 键 / 双击画面：切换「桌面窗口模式 ⇄ 无边框全屏游玩」（全屏下按 Esc 退回窗口）
-- B 键：一键实测本机芯片推荐档位
-- 数字键 1–6：切换补帧档位（玩原生 60 帧游戏请按 1 切直通）
-- K 键：切换自适应锐化强度（关 / 标准 0.55 / 强 0.90）
-- U 键：切换 USB 256KB 无损直读（10Gbps 0bda:0911 采集卡可在面板一键授权安装组件，免终端免 Xcode）
-- H 键：常显实时帧率与等待延迟状态条
-- Q 键 / ⌘Q：退出软件
+Install
+1. Drag Maccap.app to Applications.
+2. If macOS cannot verify the developer, Control-click Maccap.app and choose Open.
+3. Allow camera and microphone access.
+
+PS5 settings
+1. Turn off HDCP (System › HDMI). If it is on, the picture is black.
+2. Turn off HDR, VRR and 120Hz output.
+3. Set the resolution to 2160p or 1080p at 60Hz.
+4. Set audio output to 2-channel Linear PCM.
+
+Press B to benchmark. After about 3 s, a window shows the settings this Mac can hold.
 TXT
 
 rm -f "$DMG_OUT"

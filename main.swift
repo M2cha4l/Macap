@@ -100,7 +100,19 @@ enum Prefs {
     static func saveAudioGainDb(_ db: Double) { guard enabled else { return }; ud.set(db, forKey: "pref.audioGainDb") }
     static func saveHudPinned(_ on: Bool) { guard enabled else { return }; ud.set(on, forKey: "pref.hudPinned") }
     static func loadHudPinned() -> Bool { enabled ? ud.bool(forKey: "pref.hudPinned") : false }
+    static func saveLanguage(_ l: Lang) { guard enabled else { return }; ud.set(l.rawValue, forKey: "pref.language") }
+    static func loadLanguage() -> Lang? { enabled ? ud.string(forKey: "pref.language").flatMap(Lang.init) : nil }
 }
+
+enum Lang: String, CaseIterable {
+    case zh, en
+    var name: String { self == .zh ? "中文" : "English" }
+    /// Saved choice, else the first system language. `--lang` overrides it for one run.
+    static var current: Lang = Prefs.loadLanguage() ?? (Locale.preferredLanguages.first?.hasPrefix("zh") == true ? .zh : .en)
+}
+
+/// Every UI string goes through here, so both languages sit side by side at the call site.
+func tr(_ zh: String, _ en: String) -> String { Lang.current == .zh ? zh : en }
 
 func parseOptions() -> Options {
     var o = Options()
@@ -151,6 +163,7 @@ func parseOptions() -> Options {
         case "--sharpness": o.sharpness = min(1.0, max(0.0, Double(it.next() ?? "") ?? 0.55)); o.sharpnessExplicit = true
         case "--fullscreen": o.fullscreen = true
         case "--open-menu": o.openMenu = true
+        case "--lang": if let l = Lang(rawValue: it.next() ?? "") { Lang.current = l }
         case "--upscale": o.upscale = UpscaleMode(rawValue: it.next() ?? "") ?? .off
         case "--grid":
             let v = (0..<6).map { _ in Int(it.next() ?? "") ?? 0 }
@@ -251,8 +264,12 @@ func audioDevices() -> [AVCaptureDevice] {
 func preferredVideoDevice(_ name: String) -> AVCaptureDevice? {
     let devs = videoDevices()
     if !name.isEmpty { return devs.first { $0.localizedName.localizedCaseInsensitiveContains(name) } }
+    // A Continuity iPhone reports deviceType .external and carries the phone's own name ("aaaa Camera"),
+    // so names alone let it through; isContinuityCamera, the model ID and the maker identify it.
     func isBuiltInOrVirtualOrPhone(_ d: AVCaptureDevice) -> Bool {
-        ["OBS", "iPhone", "iPad", "Virtual", "MacBook", "FaceTime", "Continuity", "Desk View"].contains {
+        if d.isContinuityCamera || d.manufacturer == "Apple Inc." { return true }
+        if ["iPhone", "iPad"].contains(where: { d.modelID.hasPrefix($0) }) { return true }
+        return ["OBS", "iPhone", "iPad", "Virtual", "MacBook", "FaceTime", "Continuity", "Desk View"].contains {
             d.localizedName.localizedCaseInsensitiveContains($0)
         }
     }
@@ -944,12 +961,12 @@ enum Mode: Int {
     }
     var title: String {
         switch self {
-        case .pass: return "[1] 直通·不补帧"
-        case .single: return "[2] 补帧·最低延迟（补的帧偏软）"
-        case .tiled: return "[3] 补帧·分块算"
-        case .rifeFast: return "[4] 补帧·显卡·延迟低"
-        case .rifeBalanced: return "[5] 补帧·显卡·画质好"
-        case .rifeMedium: return "[6] 补帧·显卡·均衡4.5档"
+        case .pass: return tr("直通", "Passthrough")
+        case .single: return tr("系统 720p", "System 720p")
+        case .tiled: return tr("系统 2K", "System 2K")
+        case .rifeFast: return tr("快速", "Fast")
+        case .rifeBalanced: return tr("画质", "Quality")
+        case .rifeMedium: return tr("均衡", "Balanced")
         }
     }
 }
@@ -1155,13 +1172,13 @@ final class SampleCollector {
 
     /// Key S: snapshot the last ~1 s (up to 30 frames) immediately without stalling gameplay.
     func saveManual(notify: @escaping (String) -> Void) {
-        guard opts.collect else { DispatchQueue.main.async { notify("样本收集已关闭（--no-collect）") }; return }
+        guard opts.collect else { DispatchQueue.main.async { notify(tr("样本保存已关闭（--no-collect）", "Sample saving is off (--no-collect)")) }; return }
         ringQueue.async {
             guard self.count >= 2, self.frameBytes > 0 else {
-                DispatchQueue.main.async { notify("画面刚启动，还没有可保存的帧") }; return
+                DispatchQueue.main.async { notify(tr("还没有可保存的帧", "No frames to save yet")) }; return
             }
             guard self.manualCount < self.manualSessionLimit else {
-                DispatchQueue.main.async { notify("本次手动抓拍已满 \(self.manualSessionLimit) 组上限") }; return
+                DispatchQueue.main.async { notify(tr("已达上限：\(self.manualSessionLimit) 组", "Limit reached: \(self.manualSessionLimit) samples")) }; return
             }
             self.manualCount += 1
             let idx = self.manualCount
@@ -1213,11 +1230,11 @@ final class SampleCollector {
                 Log.shared.line(String(format: "sample saved: %@ (%d frames, %dx%d, allDiff %.1f center %.1f outer %.1f gap %.1f ms)",
                                        folderName, take, w, h, trigMeta.allDiff, trigMeta.centerDiff, trigMeta.outerDiff, trigMeta.gapMs))
                 if let notify {
-                    DispatchQueue.main.async { notify("已抓拍刚才 \(take) 张原画（\(folderName)）") }
+                    DispatchQueue.main.async { notify(tr("已保存 \(take) 帧（\(folderName)）", "Saved \(take) frames (\(folderName))")) }
                 }
             } catch {
                 Log.shared.line("sample save failed: \(error.localizedDescription)")
-                if let notify { DispatchQueue.main.async { notify("抓拍保存失败：\(error.localizedDescription)") } }
+                if let notify { DispatchQueue.main.async { notify(tr("保存失败：", "Save failed: ") + error.localizedDescription) } }
             }
         }
     }
@@ -2349,13 +2366,13 @@ enum HardwareBenchmark {
         var isSmooth: Bool { p95Ms <= HardwareBenchmark.smoothP95LimitMs && p50Ms <= HardwareBenchmark.smoothP50LimitMs }
         var isBorderline: Bool { !isSmooth && p95Ms <= HardwareBenchmark.borderlineP95LimitMs }
         var verdict: String {
-            if isSmooth { return "稳带" }
-            if isBorderline { return "贴边" }
-            return "超负荷"
+            if isSmooth { return tr("稳定", "stable") }
+            if isBorderline { return tr("勉强", "marginal") }
+            return tr("太慢", "too slow")
         }
         var fullPresetLabel: String {
-            let r = maxWidth == 0 ? "4K 原生 (3840×2160)" : (maxWidth == 2560 ? "限制 2K (2560×1440)" : "限制 1080p (1920×1080)")
-            return "\(r) ＋ \(mode.title)"
+            let r = maxWidth == 0 ? "4K" : (maxWidth == 2560 ? "2K" : "1080p")
+            return "\(r) + \(mode.title)"
         }
     }
 
@@ -2372,28 +2389,27 @@ enum HardwareBenchmark {
 
         func formattedSummary() -> String {
             var lines: [String] = []
-            lines.append("本机芯片：\(chipName)\(modelIdentifier.isEmpty ? "" : "（\(modelIdentifier)）")")
-            lines.append("PS5 30→60 帧不掉帧红线：单张显卡补帧需 ≤ 25.5 毫秒")
+            lines.append(tr("芯片：", "Chip: ") + chipName + (modelIdentifier.isEmpty ? "" : " (\(modelIdentifier))"))
+            lines.append(tr("稳定 60 帧需要每帧 ≤ 25.5 ms", "A steady 60 fps needs ≤ 25.5 ms per frame"))
             lines.append("")
             for res in ["4K", "2K", "1080p"] {
                 let sub = entries.filter { $0.resShort == res }
                 let parts = sub.map { e in
-                    String(format: "%@ %.1fms(%@)", e.modeShort, e.p95Ms, e.verdict)
+                    String(format: "%@ %.1f ms %@", e.modeShort, e.p95Ms, e.verdict)
                 }
-                let resTitle = res == "4K" ? "4K  (3840×2160)" : (res == "2K" ? "2K  (2560×1440)" : "1080p(1920×1080)")
-                lines.append("\(resTitle)：" + parts.joined(separator: " ｜ "))
+                lines.append("\(res): " + parts.joined(separator: " | "))
             }
             lines.append("")
             if let rec = recommended {
-                lines.append("★ 本机接 PS5 最佳推荐：\(rec.fullPresetLabel)（实测 p95 \(String(format: "%.1f", rec.p95Ms)) 毫秒）")
+                lines.append(tr("推荐：", "Recommended: ") + rec.fullPresetLabel + String(format: " (p95 %.1f ms)", rec.p95Ms))
                 if let alt = alternativeNote {
-                    lines.append("  备选方案：\(alt)")
+                    lines.append(tr("备选：", "Alternative: ") + alt)
                 }
             } else {
-                lines.append("★ 本机显卡负载较高：建议选「限制 1080p ＋ [4] 显卡·延迟低」或「[1] 直通」")
+                lines.append(tr("推荐：1080p + ", "Recommended: 1080p + ") + Mode.rifeFast.title + tr("，或", ", or ") + Mode.pass.title)
             }
             if isFanlessAir {
-                lines.append("  提示：检测到无风扇机型，连续游玩半小时以上若机身发热降频，可在右键菜单往下降一档分辨率。")
+                lines.append(tr("无风扇机型：长时间玩发热时，降一档分辨率。", "Fanless Mac: if it gets hot, lower the resolution one step."))
             }
             return lines.joined(separator: "\n")
         }
@@ -2420,11 +2436,7 @@ enum HardwareBenchmark {
             ("2K", 2560, 1440, 2560),
             ("1080p", 1920, 1080, 1920),
         ]
-        let modes: [(mode: Mode, short: String)] = [
-            (.rifeFast, "[4]延迟低"),
-            (.rifeMedium, "[6]4.5档"),
-            (.rifeBalanced, "[5]画质好"),
-        ]
+        let modes: [(mode: Mode, short: String)] = [Mode.rifeFast, .rifeMedium, .rifeBalanced].map { ($0, $0.title) }
 
         var allEntries: [Entry] = []
         let pbAttrs: [String: Any] = [
@@ -2460,7 +2472,7 @@ enum HardwareBenchmark {
                 var fastAlreadyOverloaded = false
                 for m in modes {
                     guard let tier = m.mode.rifeTier else { continue }
-                    onProgress?("正在实测本机算力：\(res.short) \(m.short)…")
+                    onProgress?(tr("测速：", "Benchmark: ") + "\(res.short) \(m.short)…")
                     if fastAlreadyOverloaded && m.mode == .rifeBalanced {
                         // Fast/Medium at this resolution already exceeded >50 ms/frame; avoid multi-second GPU stall on entry chips.
                         let prev = allEntries.last?.p95Ms ?? 60.0
@@ -2521,11 +2533,11 @@ enum HardwareBenchmark {
         if let rec = bestFallback {
             if rec.maxWidth == 0 && rec.mode == .rifeFast {
                 if let twoKMed = findEntry(2560, .rifeMedium), twoKMed.isSmooth {
-                    altNote = "若更看重转视角动作细腻度，也可切「限制 2K ＋ [6] 均衡 4.5 档」（实测 \(String(format: "%.1f", twoKMed.p95Ms))ms）"
+                    altNote = tr("动作更细：", "Smoother motion: ") + twoKMed.fullPresetLabel + String(format: " (p95 %.1f ms)", twoKMed.p95Ms)
                 }
             } else if rec.maxWidth == 0 && rec.mode == .rifeBalanced, rec.p95Ms > 21.0 {
                 if let fourKMed = findEntry(0, .rifeMedium), fourKMed.isSmooth {
-                    altNote = "若追求极致跟手低延迟，可切「4K 原生 ＋ [6] 均衡 4.5 档」（实测仅 \(String(format: "%.1f", fourKMed.p95Ms))ms）"
+                    altNote = tr("延迟更低：", "Lower delay: ") + fourKMed.fullPresetLabel + String(format: " (p95 %.1f ms)", fourKMed.p95Ms)
                 }
             }
         }
@@ -2598,7 +2610,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var fastSourceNoted = false
     private var warmup = 0
     var onStatus: ((String) -> Void)?          // short on-screen status line, called on the main queue
-    var onStats: ((String) -> Void)?           // once a second while frames flow: "60.0 fps · 68 ms · 丢帧 0", main queue
+    var onStats: ((String) -> Void)?           // once a second while frames flow: "60.0 fps · 68 ms · 0 drops", main queue
     var onStreamStateChange: ((Bool) -> Void)? // true when video stream is active, false when idle/disconnected
     private(set) var isStreaming = false
     private func notifyStreamActive(_ active: Bool) {
@@ -2824,11 +2836,11 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if foundDev != nil && self.startAVFoundation() {
                         Log.shared.line("fell back to AVFoundation after raw-usb exit")
-                        self.onStatus?("直读中断，已自动回退系统采集（\(self.sourceSize)）")
+                        self.onStatus?(tr("USB 直读中断，改用系统采集（\(self.sourceSize)）", "Raw USB stopped. Using system capture (\(self.sourceSize))"))
                     } else {
                         Log.shared.line("capture card absent after raw-usb exit; prompting replug")
                         self.notifyStreamActive(false)
-                        self.onStatus?("直读中断且未检测到采集卡，请重新插拔采集卡")
+                        self.onStatus?(tr("USB 直读中断，未找到采集卡。请重新插拔。", "Raw USB stopped and no capture card found. Reconnect it."))
                         self.scheduleReconnectLoop()
                     }
                 }
@@ -2847,7 +2859,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         Prefs.saveRawUSB(targetRaw)
 
         if targetRaw {
-            onStatus?("正在切换 USB 直读…")
+            onStatus?(tr("正在切换到 USB 直读…", "Switching to raw USB…"))
             clearAVSession()
             resetCaptureAndTiming()
             configLock.lock()
@@ -2861,23 +2873,23 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if r.ok {
                         self.finishActivateRawUSB(r.raw, modeName: modeName, width: r.width, height: r.height, usbSpeed: r.usbSpeed)
-                        self.onStatus?("输入源：USB 直读 256KB（\(self.sourceSize)）")
+                        self.onStatus?(tr("输入：USB 直读（\(self.sourceSize)）", "Input: raw USB (\(self.sourceSize))"))
                     } else {
                         Log.shared.line("raw-usb switch failed (\(r.reason)); staying on AVFoundation")
                         self.usingRawUSB = false
                         Prefs.saveRawUSB(false)
                         if self.startAVFoundation() {
-                            self.onStatus?("直读未就绪，保持系统采集（\(self.sourceSize)）")
+                            self.onStatus?(tr("USB 直读未就绪，继续用系统采集（\(self.sourceSize)）", "Raw USB not ready. Staying on system capture (\(self.sourceSize))"))
                         } else {
                             self.notifyStreamActive(false)
-                            self.onStatus?("直读未就绪且未找到外接采集卡，等待连接…")
+                            self.onStatus?(tr("USB 直读未就绪，未找到采集卡。等待连接…", "Raw USB not ready and no capture card found. Waiting…"))
                             self.scheduleReconnectLoop()
                         }
                     }
                 }
             }
         } else {
-            onStatus?("正在切回系统采集…")
+            onStatus?(tr("正在切换到系统采集…", "Switching to system capture…"))
             rawCapture?.stop()
             rawCapture = nil
             usingRawUSB = false
@@ -2893,10 +2905,10 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 DispatchQueue.main.async {
                     self.switchingSource = false
                     if self.startAVFoundation() {
-                        self.onStatus?("输入源：系统采集 AVFoundation（\(self.sourceSize)）")
+                        self.onStatus?(tr("输入：系统采集（\(self.sourceSize)）", "Input: system capture (\(self.sourceSize))"))
                     } else {
                         self.notifyStreamActive(false)
-                        self.onStatus?("切回系统采集未找到外接采集卡，等待连接…")
+                        self.onStatus?(tr("未找到采集卡，等待连接…", "No capture card. Waiting…"))
                         self.scheduleReconnectLoop()
                     }
                 }
@@ -2928,12 +2940,12 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if r.ok {
                         self.finishActivateRawUSB(r.raw, modeName: modeName, width: r.width, height: r.height, usbSpeed: r.usbSpeed)
-                        self.onStatus?("\(statusPrefix)（USB 直读 \(self.sourceSize)）")
+                        self.onStatus?(statusPrefix + tr("（USB 直读 \(self.sourceSize)）", " (raw USB \(self.sourceSize))"))
                     } else if self.startAVFoundation() {
-                        self.onStatus?("\(statusPrefix)（系统采集 \(self.sourceSize)）")
+                        self.onStatus?(statusPrefix + tr("（系统采集 \(self.sourceSize)）", " (system capture \(self.sourceSize))"))
                     } else {
                         self.notifyStreamActive(false)
-                        self.onStatus?("切换后未检测到采集画面，等待设备就绪…")
+                        self.onStatus?(tr("没有画面，等待设备…", "No picture. Waiting for the device…"))
                         self.scheduleReconnectLoop()
                     }
                 }
@@ -2945,7 +2957,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                         self.onStatus?("\(statusPrefix)（\(self.deviceName) \(self.sourceSize)）")
                     } else {
                         self.notifyStreamActive(false)
-                        self.onStatus?("未找到所选采集设备，等待连接…")
+                        self.onStatus?(tr("未找到所选设备，等待连接…", "Selected device not found. Waiting…"))
                         self.scheduleReconnectLoop()
                     }
                 }
@@ -2955,7 +2967,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     func selectVideoDevice(_ name: String) {
         guard opts.file.isEmpty, !switchingSource else {
-            onStatus?("正在切换输入源，请稍候…")
+            onStatus?(tr("正在切换输入…", "Switching input…"))
             return
         }
         configLock.lock()
@@ -2969,12 +2981,12 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             setRawUSBEnabled(false)
             return
         }
-        restartActiveCapture(statusPrefix: name.isEmpty ? "采集设备：自动选择" : "采集设备：\(name)")
+        restartActiveCapture(statusPrefix: tr("输入：", "Input: ") + (name.isEmpty ? tr("自动", "Auto") : name))
     }
 
     func selectMaxWidth(_ width: Int) {
         guard opts.file.isEmpty, !switchingSource else {
-            onStatus?("正在切换输入源，请稍候…")
+            onStatus?(tr("正在切换输入…", "Switching input…"))
             return
         }
         configLock.lock()
@@ -2983,8 +2995,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         configLock.unlock()
         Prefs.saveMaxWidth(width)
         guard prev != width else { return }
-        let label = width == 0 ? "原生最高（4K）" : (width <= 1920 ? "1080p" : "2K")
-        restartActiveCapture(statusPrefix: "分辨率上限：\(label)")
+        let label = width == 0 ? "4K" : (width <= 1920 ? "1080p" : "2K")
+        restartActiveCapture(statusPrefix: tr("分辨率：", "Resolution: ") + label)
     }
 
     func setAudioEnabled(_ enabled: Bool) {
@@ -2998,13 +3010,13 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if enabled {
             if hadAudioObj {
                 audio?.updateLevel(gainDb: gain, volume: 1.0)
-                onStatus?("声音：已开启（+\(Int(gain)) dB）")
+                onStatus?(tr("声音：", "Audio: ") + "+\(Int(gain)) dB")
             } else {
-                restartActiveCapture(statusPrefix: "声音：已开启")
+                restartActiveCapture(statusPrefix: tr("声音：开", "Audio: on"))
             }
         } else {
             audio?.updateLevel(gainDb: gain, volume: 0.0)
-            onStatus?("声音：已静音")
+            onStatus?(tr("声音：关", "Audio: off"))
         }
     }
 
@@ -3019,9 +3031,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         Prefs.saveAudioGainDb(db)
         if hadAudioObj {
             audio?.updateLevel(gainDb: db, volume: 1.0)
-            onStatus?("音量放大：+\(Int(db)) dB")
+            onStatus?(tr("音量：", "Volume: ") + "+\(Int(db)) dB")
         } else {
-            restartActiveCapture(statusPrefix: "音量放大：+\(Int(db)) dB")
+            restartActiveCapture(statusPrefix: tr("音量：", "Volume: ") + "+\(Int(db)) dB")
         }
     }
 
@@ -3052,7 +3064,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             Log.shared.line("raw-usb unavailable (\(res.reason)); falling back to AVFoundation")
             usingRawUSB = false
             if startAVFoundation() {
-                DispatchQueue.main.async { self.onStatus?("直读未就绪，已自动回退系统采集（\(self.sourceSize)）") }
+                DispatchQueue.main.async { self.onStatus?(tr("USB 直读未就绪，改用系统采集（\(self.sourceSize)）", "Raw USB not ready. Using system capture (\(self.sourceSize))")) }
                 return true
             }
             notifyStreamActive(false)
@@ -3183,7 +3195,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             if wantRaw && pref.isEmpty { self.usingRawUSB = true }
             if self.start() {
                 Log.shared.line("reconnected")
-                self.onStatus?("采集设备已连接（\(self.sourceSize)）")
+                self.onStatus?(tr("已连接（\(self.sourceSize)）", "Connected (\(self.sourceSize))"))
             } else {
                 self.scheduleReconnectLoop()
             }
@@ -3196,7 +3208,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             guard !self.usingRawUSB, !self.switchingSource, self.reconnectTimer == nil else { return }
             Log.shared.line("capture device lost (\(note.name.rawValue)); waiting to reconnect")
             self.notifyStreamActive(false)
-            self.onStatus?("采集设备断开，等待重新连接…")
+            self.onStatus?(tr("采集卡已断开，等待重连…", "Capture card disconnected. Waiting…"))
             self.session.stopRunning()
             self.scheduleReconnectLoop()
         }
@@ -3230,7 +3242,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     func setMode(_ m: Mode) {
         if m == .single || m == .tiled {
             if #unavailable(macOS 26.0) {
-                DispatchQueue.main.async { self.onStatus?("2/3 档系统补帧需 macOS 26+，请使用 4/5/6 显卡档") }
+                DispatchQueue.main.async { self.onStatus?(tr("系统补帧需要 macOS 26", "System modes need macOS 26")) }
                 return
             }
         }
@@ -3247,16 +3259,16 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     func setSharpness(_ value: Float) {
         let clamped = min(1.0, max(0.0, value))
         let label: String
-        if clamped < 0.05 { label = "关（0.0）" }
-        else if clamped < 0.75 { label = String(format: "标准（%.2f）", clamped) }
-        else { label = String(format: "强（%.2f）", clamped) }
+        if clamped < 0.05 { label = tr("关", "Off") }
+        else if clamped < 0.75 { label = tr("标准", "Normal") + String(format: " %.2f", clamped) }
+        else { label = tr("强", "Strong") + String(format: " %.2f", clamped) }
         sharpLock.lock()
         casStrength = clamped
         let inRife = (mode.rifeTier != nil)
         sharpLock.unlock()
         Prefs.saveSharpness(clamped)
-        Log.shared.line("sharpness: \(clamped) (\(label))")
-        let note = inRife ? "锐化：\(label)　　按 K 切换" : "锐化：\(label)（切到 4/5/6 显卡档生效）"
+        Log.shared.line("sharpness: \(clamped)")
+        let note = tr("锐化：", "Sharpen: ") + label + "\u{3000}\u{3000}" + (inRife ? tr("按 K 切换", "Press K to change") : tr("只在快速、均衡、画质档生效", "Works only in Fast, Balanced and Quality"))
         DispatchQueue.main.async { self.onStatus?(note) }
     }
 
@@ -3283,7 +3295,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let m: UpscaleMode = upscaler.mode == .off ? .metalfx : .off
         upscaler.mode = m
         Log.shared.line("upscale: \(m.rawValue)")
-        DispatchQueue.main.async { self.onStatus?(m == .off ? "放大：关　　按 X 切换" : "放大：MetalFX 开　　按 X 切换") }
+        DispatchQueue.main.async { self.onStatus?(tr("放大：", "Upscale: ") + (m == .off ? tr("关", "Off") : "MetalFX") + "\u{3000}\u{3000}" + tr("按 X 切换", "Press X to change")) }
     }
 
     func cycleSharpness() {
@@ -3301,7 +3313,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         resetTiming()
         ensureInterpolators()
         Log.shared.line("mode: \(m.rawValue) \(m.title)")
-        let text = "模式：" + m.title + "　　按 1-6 切换"
+        let text = tr("补帧：", "Interpolation: ") + m.title + "\u{3000}\u{3000}" + tr("按数字键切换", "Number keys change it")
         DispatchQueue.main.async { self.onStatus?(text) }
     }
 
@@ -3312,12 +3324,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         maxWidthPref = targetWidth
         configLock.unlock()
         Prefs.saveMaxWidth(targetWidth)
-        let resLabel = targetWidth == 0 ? "4K 原生" : (targetWidth <= 1920 ? "1080p" : "2K")
-        if prevW != targetWidth {
-            restartActiveCapture(statusPrefix: "已应用推荐：\(resLabel) ＋ \(targetMode.title)")
-        } else {
-            onStatus?("已应用推荐：\(resLabel) ＋ \(targetMode.title)")
-        }
+        let resLabel = targetWidth == 0 ? "4K" : (targetWidth <= 1920 ? "1080p" : "2K")
+        let text = tr("已应用：", "Applied: ") + "\(resLabel) + \(targetMode.title)"
+        if prevW != targetWidth { restartActiveCapture(statusPrefix: text) } else { onStatus?(text) }
     }
 
     private func deliverFrame(_ pb: CVPixelBuffer, pts: CMTime, arrival: CMTime) {
@@ -3522,7 +3531,6 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var contentUsed = false, tentative = false, repeatRun = 0
     private var parityChange = [0.0, 0.0]         // recent picture change seen on even / odd capture frames
     private(set) var paritySwitches = 0
-    private var seenCount = 0
     private var noiseFloor = 0.0, sceneRef = 0.0, maxSinceKept = 99.0
     private var pickGaps = [0, 0, 0, 0], samePictureAgain = 0
 
@@ -3534,7 +3542,6 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             // one 60 Hz step apart say anything about repeats.
             let seenGap = lastSeenPTS.isValid ? ms(CMTimeSubtract(pts, lastSeenPTS)) : -1
             lastSeenPTS = pts
-            seenLock.lock(); seenCount += 1; seenLock.unlock()
             if seenGap > 60 || (seenGap < 0 && seenGap != -1) { Log.shared.line(String(format: "capture gap: %.0f ms between delivered frames", seenGap)) }
             let d = differenceFromPrevious(pb)
             let neighbour = seenGap > 5 && seenGap < 22          // previous frame really was the one before
@@ -3560,7 +3567,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     if now60 != contentIs60 {
                         contentIs60 = now60
                         Log.shared.line(String(format: "game content is ~%d fps (repeated frames %.0f%%)", now60 ? 60 : 30, share * 100))
-                        if mode != .pass && opts.autoPass { queue.async { self.resetTiming() }; let t = now60 ? "游戏已是 60 帧，自动直通" : "游戏是 30 帧，补到 60"; DispatchQueue.main.async { self.onStatus?(t) } }
+                        if mode != .pass && opts.autoPass { queue.async { self.resetTiming() }; let t = now60 ? tr("信号是 60 帧，自动直通", "60 fps input. Passthrough") : tr("信号是 30 帧，开始补帧", "30 fps input. Interpolating"); DispatchQueue.main.async { self.onStatus?(t) } }
                     }
                 }
             } else { recentDiffs.removeAll() }
@@ -3646,7 +3653,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if fastSource && !fastSourceNoted {
             fastSourceNoted = true
             Log.shared.line("source is already ~60 fps on a 60 Hz screen: passing through")
-            DispatchQueue.main.async { self.onStatus?("信号已是 60 帧，自动直通") }
+            DispatchQueue.main.async { self.onStatus?(tr("信号是 60 帧，自动直通", "60 fps input. Passthrough")) }
         }
         if passing || fastSource {
             if srcGap > 5 && srcGap < 60 {
@@ -3905,16 +3912,14 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let srcIs60 = currentActiveSourceFps() >= 50
         var stats: String
         if passing || fastSourceNoted {
-            stats = String(format: "%.1f fps · %.0f ms · 丢帧 0", Double(frames) / span, percentile(procMs, 0.95))
+            stats = String(format: "%.1f fps · %.0f ms · ", Double(frames) / span, percentile(procMs, 0.95)) + tr("丢帧 0", "0 drops")
             Log.shared.line(String(format: "src %@ in %.1f fps | pass-through | device delivery p50 %.1f p95 %.1f ms | our processing p95 %.2f ms (arrival -> display layer; excludes vsync and compositor)",
                                    sourceSize, Double(frames) / span, percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(procMs, 0.95)))
         } else {
             // Scheduled hold from capture timestamp to the original's display time. Not included: delay inside the
             // capture device before the timestamp, waiting for the next display refresh, and the system compositor.
             let hold = percentile(holdMs, 0.5)
-            seenLock.lock(); let seen = seenCount; seenCount = 0; seenLock.unlock()
-            let src = srcIs60 ? String(format: "采集 %.0f 帧（其中新画面 %.0f）", Double(seen) / span, Double(frames) / span) : String(format: "采集 %.0f 帧", Double(frames) / span)
-            stats = String(format: "%.1f fps · %.0f ms · 丢帧 %d", Double(frames + mids) / span, hold, droppedMids)
+            stats = String(format: "%.1f fps · %.0f ms · ", Double(frames + mids) / span, hold) + String(format: tr("丢帧 %d", "%d drops"), droppedMids)
             Log.shared.line(String(format: "src %@ in %.1f fps | out %.1f fps | mid %d late %d dropped %d fail %d | orig late %d | delivery p50 %.1f p95 %.1f ms | ready p95 %.1f ms | interp p95 %.1f ms | offset %.1f ms | hold to refresh p50 %.1f p95 %.1f ms (%@) | beyond delivery %.1f ms",
                                    sourceSize, Double(frames) / span, Double(frames + mids) / span, mids, lateMids, droppedMids, failed, lateOrig,
                                    percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(readyMs, 0.95), percentile(interpMs, 0.95),
@@ -3950,7 +3955,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             Log.shared.line(String(format: "   audio: %d buffers, delayed %.0f ms, clock resyncs %d, renderer failures %d", snap.buffers, snap.delay, snap.resyncs, snap.failures) + " | " + snap.dbg)
         }
         let sc = collector.totalSaved
-        if sc > 0 { stats += " · 样本 \(sc)" }
+        if sc > 0 { stats += " · " + String(format: tr("样本 %d", "%d samples"), sc) }
         DispatchQueue.main.async { self.onStats?(stats) }
         holdMs.removeAll()
         frames = 0; mids = 0; lateMids = 0; lateOrig = 0; failed = 0; droppedMids = 0
@@ -4527,7 +4532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private let windowedStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
     private let fullscreenWindowLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
-    private let controlMenu = NSMenu(title: "控制")
+    private let controlMenu = NSMenu()
 
     private var desiredWindowLevel: NSWindow.Level {
         isBorderlessFullscreen ? fullscreenWindowLevel : .normal
@@ -4583,10 +4588,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "需要摄像头权限才能读取 PS5 采集卡画面"
-        alert.informativeText = "免驱 HDMI 采集卡在 macOS 中识别为外接摄像头。\n请在「系统设置 → 隐私与安全性 → 摄像头」中勾选 Maccap，然后重新打开本应用。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "退出")
+        alert.messageText = tr("需要摄像头权限", "Camera access needed")
+        alert.informativeText = tr("macOS 把采集卡当作摄像头。请在 系统设置 › 隐私与安全性 › 摄像头 中打开 Maccap，然后重新打开 Maccap。",
+                                   "macOS treats the capture card as a camera. Turn on Maccap in System Settings › Privacy & Security › Camera, then reopen Maccap.")
+        alert.addButton(withTitle: tr("打开系统设置", "Open System Settings"))
+        alert.addButton(withTitle: tr("退出", "Quit"))
         if alert.runModal() == .alertFirstButtonReturn,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
             NSWorkspace.shared.open(url)
@@ -4674,7 +4680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         pipeline.layer.frame = contentView.bounds
         pipeline.updateDisplayTarget()
         attachDisplayLink(to: screen)
-        showStatus("输出显示器：\(screen.localizedName)", force: true)
+        showStatus(tr("屏幕：", "Display: ") + screen.localizedName, force: true)
     }
 
     // MARK: - Card-row menu
@@ -4692,42 +4698,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let gains = [0.0, 12.0, 20.0, 26.0]
         func notes(_ n: [String]) -> (Int) -> String { { n.indices.contains($0) ? n[$0] : "" } }
         return [
-            MenuItem(title: "补帧档位", symbol: "square.on.square",
-                     options: { ["直通", "[4] 低延迟", "[6] 均衡", "[5] 画质"] },
+            MenuItem(title: tr("补帧", "Interpolation"), symbol: "square.on.square",
+                     options: { modes.map(\.title) },
                      current: { modes.firstIndex(of: p.requestedMode) ?? -1 },
                      apply: { p.setMode(modes[$0]) },
-                     note: notes(["不补帧。没有等待，只有 30 帧。", "单帧约 17 ms，延迟约 68 ms。最稳。", "单帧约 25 ms。画质更好，余量小。", "M1 Pro 跟不上 2K，会掉到约 48 帧。"])),
-            MenuItem(title: "采集分辨率", symbol: "viewfinder",
+                     note: notes([tr("不补帧，不加延迟。60 帧游戏用这档。", "No interpolation, no added delay. Use it for 60 fps games."),
+                                  tr("每帧约 17 ms，总延迟约 68 ms。最稳。", "About 17 ms per frame, 68 ms total delay. Most stable."),
+                                  tr("每帧约 25 ms。画面更好，余量小。", "About 25 ms per frame. Better picture, less headroom."),
+                                  tr("最慢。先用测速确认跑得动。", "Slowest. Run the benchmark first.")])),
+            MenuItem(title: tr("分辨率", "Resolution"), symbol: "viewfinder",
                      options: { ["4K", "2K", "1080p"] },
                      current: { let w = p.currentMaxWidth; return w == 0 ? 0 : (w <= 1920 ? 2 : 1) },
                      apply: { p.selectMaxWidth(widths[$0]) },
-                     note: notes(["M1 Pro 补不动 4K，只适合直通。", "推荐。PS5 输出 4K，这里缩到 2K 再补帧。", "最省，画面最软。"])),
-            MenuItem(title: "MetalFX 超分", symbol: "arrow.up.left.and.arrow.down.right",
-                     options: { ["关", "开"] },
+                     note: notes([tr("原样采集 4K。补帧通常跑不动，适合直通。", "Full 4K. Usually too slow to interpolate. Good for passthrough."),
+                                  tr("推荐。4K 信号缩到 2K 再补帧。", "Recommended. Scales 4K down to 2K before interpolation."),
+                                  tr("最快，画面最软。", "Fastest, softest picture.")])),
+            MenuItem(title: tr("放大", "Upscale"), symbol: "arrow.up.left.and.arrow.down.right",
+                     options: { [tr("关", "Off"), "MetalFX"] },
                      current: { p.upscaler.mode == .metalfx ? 1 : 0 },
                      apply: { if ($0 == 1) != (p.upscaler.mode == .metalfx) { p.toggleUpscale() } },
-                     note: notes(["系统直接拉伸到 4K，文字发虚。", "用 MetalFX 放大到 4K，每帧约 2 ms。"])),
-            MenuItem(title: "锐化", symbol: "triangle",
-                     options: { ["关", "0.55", "0.90"] },
+                     note: notes([tr("系统拉伸到屏幕大小，文字偏软。", "The system stretches the picture. Text looks soft."),
+                                  tr("MetalFX 放大到屏幕大小，每帧约 2 ms。", "MetalFX scales to the screen. About 2 ms per frame.")])),
+            MenuItem(title: tr("锐化", "Sharpen"), symbol: "triangle",
+                     options: { [tr("关", "Off"), tr("标准", "Normal"), tr("强", "Strong")] },
                      current: { let v = p.currentSharpness; return v < 0.15 ? 0 : (v < 0.75 ? 1 : 2) },
                      apply: { p.setSharpness(sharpness[$0]) },
-                     note: notes(["开 MetalFX 时推荐关。", "标准锐化。", "强锐化，噪点会变明显。"])),
-            MenuItem(title: "状态条", symbol: "chart.xyaxis.line",
-                     options: { ["隐藏", "常显"] },
+                     note: notes([tr("开 MetalFX 时建议关。", "Turn it off when MetalFX is on."),
+                                  tr("默认。", "Default."),
+                                  tr("噪点会更明显。", "Noise becomes more visible.")])),
+            MenuItem(title: tr("状态条", "Stats"), symbol: "chart.xyaxis.line",
+                     options: { [tr("隐藏", "Hide"), tr("显示", "Show")] },
                      current: { [unowned self] in self.hudPinned ? 1 : 0 },
                      apply: { [unowned self] in self.setHudPinned($0 == 1) },
-                     note: notes(["游玩时屏幕上只有画面。", "角落常显帧率和延迟。"])),
-            MenuItem(title: "声音", symbol: "speaker.wave.2",
-                     options: { ["静音", "+0 dB", "+12 dB", "+20 dB", "+26 dB"] },
+                     note: notes([tr("屏幕上只有画面。", "Only the picture on screen."),
+                                  tr("角落显示帧率和延迟。", "Shows fps and delay in the corner.")])),
+            MenuItem(title: tr("声音", "Audio"), symbol: "speaker.wave.2",
+                     options: { [tr("关", "Off"), "+0 dB", "+12 dB", "+20 dB", "+26 dB"] },
                      current: {
                          guard p.isAudioEnabled else { return 0 }
                          let g = p.currentAudioGainDb
                          return 1 + (g < 6 ? 0 : (g < 16 ? 1 : (g < 23 ? 2 : 3)))
                      },
                      apply: { if $0 == 0 { p.setAudioEnabled(false) } else { p.setAudioGainDb(gains[$0 - 1]) } },
-                     note: notes(["不放采集卡的声音。", "原始音量。采集卡的声音通常很轻。", "适中放大。", "默认。声音延后，和画面对齐。", "强放大。声音大时会破音。"])),
-            MenuItem(title: "输入源", symbol: "cable.connector",
-                     options: { ["自动识别"] + videoDevices().map { $0.localizedName + ($0.deviceType == .external ? " [外接]" : "") } + ["刷新设备"] },
+                     note: notes([tr("不播放采集卡的声音。", "Capture card audio off."),
+                                  tr("原始音量，通常偏轻。", "Original level. Usually quiet."),
+                                  tr("适中。", "Medium."),
+                                  tr("默认。", "Default."),
+                                  tr("最响。声音大时可能破音。", "Loudest. Loud scenes may clip.")])),
+            MenuItem(title: tr("输入", "Input"), symbol: "cable.connector",
+                     options: { [tr("自动", "Auto")] + videoDevices().map(\.localizedName) + [tr("重新查找", "Rescan")] },
                      current: {
                          let pref = p.currentDevicePref
                          guard !pref.isEmpty else { return 0 }
@@ -4741,21 +4760,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      },
                      note: { i in
                          let devs = videoDevices()
-                         if i == 0 { return "自动找外接采集卡。PS5 要关 HDCP，否则黑屏。" }
-                         if i <= devs.count { return devs[i - 1].deviceType == .external ? "只用这台外接设备。" : "只用这台设备。它不是外接采集卡。" }
-                         return "重新找设备。没有画面时马上连接。"
+                         if i == 0 { return tr("自动找采集卡。PS5 要关闭 HDCP，否则黑屏。", "Finds the capture card. Turn off HDCP on the PS5, or the picture stays black.") }
+                         if i <= devs.count { return devs[i - 1].deviceType == .external ? tr("只用这台设备。", "Use only this device.") : tr("只用这台设备。它不是采集卡。", "Use only this device. It is not a capture card.") }
+                         return tr("重新查找设备。", "Look for devices again.")
                      }),
-            MenuItem(title: "输出屏幕", symbol: "display",
+            MenuItem(title: tr("屏幕", "Display"), symbol: "display",
                      options: { NSScreen.screens.map { "\($0.localizedName)（\(Int($0.frame.width * $0.backingScaleFactor))×\(Int($0.frame.height * $0.backingScaleFactor))）" } },
                      current: { [unowned self] in self.activeScreenIndex() },
                      apply: { [unowned self] i in
                          let screens = NSScreen.screens
                          if screens.indices.contains(i) { self.moveToScreen(screens[i], savePref: true) }
                      },
-                     note: { [unowned self] i in i == self.activeScreenIndex() ? "画面在这块屏幕上。" : "把画面移到这块屏幕。" }),
-            MenuItem(title: "工具", symbol: "wrench.and.screwdriver",
+                     note: { [unowned self] i in i == self.activeScreenIndex() ? tr("画面在这块屏幕上。", "The picture is on this display.") : tr("把画面移到这块屏幕。", "Move the picture to this display.") }),
+            MenuItem(title: tr("语言", "Language"), symbol: "globe",
+                     options: { Lang.allCases.map(\.name) },
+                     current: { Lang.allCases.firstIndex(of: Lang.current) ?? 0 },
+                     apply: { [unowned self] i in self.setLanguage(Lang.allCases[i]) },
+                     note: { _ in "中文 / English" }),
+            MenuItem(title: tr("工具", "Tools"), symbol: "wrench.and.screwdriver",
                      options: { [unowned self] in
-                         [self.runningBenchmark ? "实测中…" : "一键实测 (B)", self.isBorderlessFullscreen ? "退出全屏 (F)" : "进入全屏 (F)", "10G 直读 (U)"]
+                         [self.runningBenchmark ? tr("测速中…", "Running…") : tr("测速 (B)", "Benchmark (B)"),
+                          self.isBorderlessFullscreen ? tr("退出全屏 (F)", "Exit Fullscreen (F)") : tr("全屏 (F)", "Fullscreen (F)"),
+                          tr("USB 直读 (U)", "Raw USB (U)")]
                      },
                      current: { -1 },
                      apply: { [unowned self] i in
@@ -4767,22 +4793,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      },
                      note: { [unowned self] i in
                          switch i {
-                         case 0: return self.runningBenchmark ? "正在测算。结果会弹窗显示。" : "约 3 秒。测出本机能带哪一档。"
-                         case 1: return self.isBorderlessFullscreen ? "退回窗口模式。" : "无边框全屏。按 F 切换。"
+                         case 0: return self.runningBenchmark ? tr("测速中，结果会弹窗显示。", "Running. The results open in a window.") : tr("约 3 秒，测出这台 Mac 能用哪一档。", "About 3 s. Finds the settings this Mac can hold.")
+                         case 1: return self.isBorderlessFullscreen ? tr("回到窗口。", "Back to a window.") : tr("无边框全屏。", "Borderless fullscreen.")
                          default:
-                             if p.usingRawUSB { return "已开启。再按一次切回系统采集。" }
+                             if p.usingRawUSB { return tr("已开启。再按一次关闭。", "On. Press again to turn it off.") }
                              return RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
-                                 ? "绕过系统驱动直读 USB。4K60 不丢帧。" : "先安装直读组件。需要管理员密码。"
+                                 ? tr("绕过系统驱动读 USB，4K60 不丢帧。", "Reads USB directly. 4K60 without drops.")
+                                 : tr("要先安装组件，需要管理员密码。", "Needs a helper first. Asks for an admin password.")
                          }
                      }),
         ]
     }
 
+    private func setLanguage(_ l: Lang) {
+        guard l != Lang.current else { return }
+        Lang.current = l
+        Prefs.saveLanguage(l)
+        setupMainMenu()
+        DispatchQueue.main.async {   // the card menu is still inside activate(); rebuild after it returns
+            self.cardMenu.items = self.makeMenuItems()
+            self.updateMenuVisibility()
+        }
+    }
+
     /// Open while no stream plays; over a stream only after P (or --open-menu).
     private func updateMenuVisibility() {
         let streaming = pipeline.isStreaming
-        cardMenu.hint = streaming ? "← → 选卡片　↑ ↓ 选值　Return 确定　Esc 回到游戏" : "← → 选卡片　↑ ↓ 选值　Return 确定　插上采集卡后自动出画面"
-        cardMenu.stats = streaming ? (liveStats ?? "已连接 · \(pipeline.currentSourceSize)") : "未检测到采集卡"
+        cardMenu.hint = tr("← → 选择　↑ ↓ 改值　Return 确定　", "← → Select　↑ ↓ Change　Return OK　")
+            + (streaming ? tr("Esc 返回游戏", "Esc Back to game") : tr("插上采集卡即开始", "Plug in a capture card to start"))
+        cardMenu.stats = streaming ? (liveStats ?? tr("已连接 · ", "Connected · ") + pipeline.currentSourceSize) : tr("未检测到采集卡", "No capture card")
         cardMenu.setOpen(!streaming || menuOverVideo)
         cardMenu.reload()
         updateStatsPill()
@@ -4805,16 +4844,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         cardMenu.reload()
         guard !pipeline.isStreaming else { return }
         if pipeline.start() {
-            showStatus("采集设备已连接（\(pipeline.currentSourceSize)）", force: true)
+            showStatus(tr("已连接（\(pipeline.currentSourceSize)）", "Connected (\(pipeline.currentSourceSize))"), force: true)
         } else {
-            showStatus("仍未检测到外接 PS5 采集卡，请检查 USB 与 HDMI 连接", force: true)
+            showStatus(tr("未找到采集卡。检查 USB 和 HDMI。", "No capture card. Check USB and HDMI."), force: true)
         }
     }
 
     private func setHudPinned(_ on: Bool) {
         hudPinned = on
         Prefs.saveHudPinned(on)
-        if on { showStatus("状态条：常显", force: true) }
+        if on { showStatus(tr("状态条：开", "Stats: on"), force: true) }
         updateStatsPill()
         cardMenu.reload()
     }
@@ -4835,19 +4874,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 Maccap", action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: tr("关于 Maccap", "About Maccap"), action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let hideItem = NSMenuItem(title: "隐藏 Maccap", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideItem = NSMenuItem(title: tr("隐藏 Maccap", "Hide Maccap"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hideItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(hideItem)
         appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "退出 Maccap", action: #selector(menuQuit(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: tr("退出 Maccap", "Quit Maccap"), action: #selector(menuQuit(_:)), keyEquivalent: "q")
         quitItem.target = self
         quitItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(quitItem)
         appItem.submenu = appMenu
 
-        let ctrlItem = NSMenuItem(title: "控制", action: nil, keyEquivalent: "")
+        let ctrlItem = NSMenuItem(title: tr("控制", "Controls"), action: nil, keyEquivalent: "")
+        controlMenu.title = ctrlItem.title
         controlMenu.delegate = self
         ctrlItem.submenu = controlMenu
         main.addItem(ctrlItem)
@@ -4868,7 +4908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func buildPopupSettingsMenu() -> NSMenu {
-        let m = NSMenu(title: "Maccap 设置")
+        let m = NSMenu()
         populateSettingsMenu(m)
         return m
     }
@@ -4882,195 +4922,119 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         m.popUp(positioning: nil, at: pt, in: view)
     }
 
+    /// The single-key shortcuts are handled by the key monitor before any menu sees them;
+    /// a modifier-free key equivalent only shows the key at the right edge of the item.
     private func populateSettingsMenu(_ menu: NSMenu) {
         menu.removeAllItems()
         menu.autoenablesItems = false
 
-        func addHeader(_ title: String) {
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-
-        // 0. Panel, Fullscreen & Benchmark
-        let menuOpen = cardMenu.isOpen
-        let panelItem = NSMenuItem(title: menuOpen ? "收起菜单 (P)" : "打开菜单 (P)", action: #selector(toggleMenu(_:)), keyEquivalent: "")
-        panelItem.target = self
-        panelItem.isEnabled = pipeline.isStreaming || !menuOpen
-        menu.addItem(panelItem)
-
-        let fsItem = NSMenuItem(title: isBorderlessFullscreen ? "退回窗口模式 (F / Esc)" : "进入无边框全屏游玩 (F)", action: #selector(uiToggleFullscreen(_:)), keyEquivalent: "f")
-        fsItem.target = self
-        menu.addItem(fsItem)
-
-        let benchTitle = runningBenchmark
-            ? "正在实测本机芯片算力（请稍候）…"
-            : "⚡ 一键测算本机接 PS5 推荐档位 (B)…"
-        let benchItem = NSMenuItem(title: benchTitle, action: #selector(menuRunBenchmark(_:)), keyEquivalent: "")
-        benchItem.target = self
-        benchItem.isEnabled = !runningBenchmark && !installingHelper
-        menu.addItem(benchItem)
-        menu.addItem(.separator())
-
-        // 1. Interpolation Mode
-        addHeader("PS5 补帧档位（快捷键 1–6）")
-        let curMode = pipeline.mode
-        let modeEntries: [(Mode, String, Bool)] = {
-            var sysAvail = false
-            if #available(macOS 26.0, *) { sysAvail = true }
-            return [
-                (.pass, "[1] 直通·不补帧（60帧原生游戏用）", true),
-                (.rifeFast, "[4] 显卡·延迟低（极速）", true),
-                (.rifeMedium, "[6] 显卡·均衡 4.5 档（推荐）", true),
-                (.rifeBalanced, "[5] 显卡·画质好（高算力 Mac 推荐）", true),
-                (.single, "[2] 系统单块·720p（需 macOS 26+）", sysAvail),
-                (.tiled, "[3] 系统分块·2K（需 macOS 26+）", sysAvail),
-            ]
-        }()
-        for (m, label, enabled) in modeEntries {
-            let item = NSMenuItem(title: label, action: #selector(menuSelectMode(_:)), keyEquivalent: "")
+        @discardableResult
+        func add(_ title: String, _ action: Selector?, key: String = "", on: Bool = false, enabled: Bool = true, to m: NSMenu? = nil) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = []
             item.target = self
-            item.tag = m.rawValue
-            item.state = (curMode == m) ? .on : .off
+            item.state = on ? .on : .off
             item.isEnabled = enabled
-            menu.addItem(item)
+            (m ?? menu).addItem(item)
+            return item
+        }
+        func submenu(_ title: String, _ build: (NSMenu) -> Void) {
+            let sub = NSMenu(title: title)
+            build(sub)
+            let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            parent.submenu = sub
+            menu.addItem(parent)
         }
 
+        let menuOpen = cardMenu.isOpen
+        add(menuOpen ? tr("隐藏菜单", "Hide Menu") : tr("显示菜单", "Show Menu"), #selector(toggleMenu(_:)), key: "p", enabled: pipeline.isStreaming || !menuOpen)
+        let fs = add(isBorderlessFullscreen ? tr("退出全屏", "Exit Fullscreen") : tr("全屏", "Fullscreen"), #selector(uiToggleFullscreen(_:)), key: "f")
+        fs.keyEquivalentModifierMask = [.command]
+        add(runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速…", "Benchmark…"), #selector(menuRunBenchmark(_:)), key: "b",
+            enabled: !runningBenchmark && !installingHelper)
         menu.addItem(.separator())
 
-        // 2. Sharpness & Resolution
-        let sharpSub = NSMenu(title: "画面锐化")
-        let curSharp = pipeline.currentSharpness
-        let sharpChoices: [(String, Float)] = [
-            ("关（0.0）", 0.0),
-            ("标准（0.55，默认）", 0.55),
-            ("强（0.90）", 0.90),
-        ]
-        for (label, val) in sharpChoices {
-            let it = NSMenuItem(title: label, action: #selector(menuSelectSharpness(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = NSNumber(value: val)
-            it.state = abs(curSharp - val) < 0.12 ? .on : .off
-            sharpSub.addItem(it)
+        let header = NSMenuItem(title: tr("补帧", "Interpolation"), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        var sysAvail = false
+        if #available(macOS 26.0, *) { sysAvail = true }
+        let curMode = pipeline.mode
+        for m in [Mode.pass, .rifeFast, .rifeMedium, .rifeBalanced, .single, .tiled] {
+            let isSystem = m == .single || m == .tiled
+            add(m.title, #selector(menuSelectMode(_:)), key: String(m.rawValue), on: curMode == m, enabled: !isSystem || sysAvail).tag = m.rawValue
         }
-        let sharpParent = NSMenuItem(title: "画面锐化 (K)", action: nil, keyEquivalent: "")
-        sharpParent.submenu = sharpSub
-        menu.addItem(sharpParent)
+        menu.addItem(.separator())
 
-        let resSub = NSMenu(title: "采集分辨率上限")
         let curMW = pipeline.currentMaxWidth
-        let resChoices: [(String, Int)] = [
-            ("原生最高（4K 3840×2160）", 0),
-            ("限制 2K（2560×1440）", 2560),
-            ("限制 1080p（1920×1080）", 1920),
-        ]
-        for (label, mw) in resChoices {
-            let it = NSMenuItem(title: label, action: #selector(menuSelectMaxWidth(_:)), keyEquivalent: "")
-            it.target = self
-            it.tag = mw
-            it.state = (curMW == mw || (mw == 2560 && curMW > 1920 && curMW < 3840) || (mw == 1920 && curMW > 0 && curMW <= 1920)) ? .on : .off
-            resSub.addItem(it)
+        submenu(tr("分辨率", "Resolution")) { sub in
+            for (label, mw) in [("4K", 0), ("2K", 2560), ("1080p", 1920)] {
+                let on = curMW == mw || (mw == 2560 && curMW > 1920 && curMW < 3840) || (mw == 1920 && curMW > 0 && curMW <= 1920)
+                add(label, #selector(menuSelectMaxWidth(_:)), on: on, to: sub).tag = mw
+            }
         }
-        let resParent = NSMenuItem(title: "采集分辨率上限", action: nil, keyEquivalent: "")
-        resParent.submenu = resSub
-        menu.addItem(resParent)
-
-        // 3. Output Display
-        let scrSub = NSMenu(title: "输出显示器")
+        add(tr("MetalFX 放大", "MetalFX Upscale"), #selector(menuToggleUpscale(_:)), key: "x", on: pipeline.upscaler.mode == .metalfx)
+        let curSharp = pipeline.currentSharpness
+        submenu(tr("锐化", "Sharpen")) { sub in
+            for (label, val) in [(tr("关", "Off"), Float(0.0)), (tr("标准", "Normal"), 0.55), (tr("强", "Strong"), 0.90)] {
+                add(label, #selector(menuSelectSharpness(_:)), on: abs(curSharp - val) < 0.12, to: sub).representedObject = NSNumber(value: val)
+            }
+        }
         let curScrID = activeScreen.map { displayID($0) } ?? 0
-        for s in NSScreen.screens {
-            let pxW = Int(s.frame.width * s.backingScaleFactor)
-            let pxH = Int(s.frame.height * s.backingScaleFactor)
-            let it = NSMenuItem(title: "\(s.localizedName)（\(pxW)×\(pxH)）", action: #selector(menuSelectScreen(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = s
-            it.state = (displayID(s) == curScrID) ? .on : .off
-            scrSub.addItem(it)
+        submenu(tr("屏幕", "Display")) { sub in
+            for s in NSScreen.screens {
+                let title = "\(s.localizedName) (\(Int(s.frame.width * s.backingScaleFactor))×\(Int(s.frame.height * s.backingScaleFactor)))"
+                add(title, #selector(menuSelectScreen(_:)), on: displayID(s) == curScrID, to: sub).representedObject = s
+            }
         }
-        let scrParent = NSMenuItem(title: "输出显示器", action: nil, keyEquivalent: "")
-        scrParent.submenu = scrSub
-        menu.addItem(scrParent)
-
         menu.addItem(.separator())
 
-        // 4. Capture Device & 10G Raw-USB Helper
-        let devSub = NSMenu(title: "采集输入设备")
         let curDevPref = pipeline.currentDevicePref
-        let autoDevItem = NSMenuItem(title: "自动识别外接 PS5 采集卡（推荐）", action: #selector(menuSelectDevice(_:)), keyEquivalent: "")
-        autoDevItem.target = self
-        autoDevItem.representedObject = ""
-        autoDevItem.state = curDevPref.isEmpty ? .on : .off
-        devSub.addItem(autoDevItem)
-        let devs = videoDevices()
-        if !devs.isEmpty { devSub.addItem(.separator()) }
-        for d in devs {
-            let tag = (d.deviceType == .external) ? " [外接]" : " [内置/其它]"
-            let it = NSMenuItem(title: d.localizedName + tag, action: #selector(menuSelectDevice(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = d.localizedName
-            it.state = (!curDevPref.isEmpty && d.localizedName.localizedCaseInsensitiveContains(curDevPref)) ? .on : .off
-            devSub.addItem(it)
+        submenu(tr("输入", "Input")) { sub in
+            add(tr("自动", "Auto"), #selector(menuSelectDevice(_:)), on: curDevPref.isEmpty, to: sub).representedObject = ""
+            let devs = videoDevices()
+            if !devs.isEmpty { sub.addItem(.separator()) }
+            for d in devs {
+                let on = !curDevPref.isEmpty && d.localizedName.localizedCaseInsensitiveContains(curDevPref)
+                add(d.localizedName, #selector(menuSelectDevice(_:)), on: on, to: sub).representedObject = d.localizedName
+            }
         }
-        let devParent = NSMenuItem(title: "采集输入设备", action: nil, keyEquivalent: "")
-        devParent.submenu = devSub
-        menu.addItem(devParent)
-
+        add(tr("USB 直读", "Raw USB"), #selector(menuToggleRawUSB(_:)), key: "u", on: pipeline.usingRawUSB)
         let helperInstalled = RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
-        let rawItem = NSMenuItem(title: "启用 USB 256KB 无损直读 (U)", action: #selector(menuToggleRawUSB(_:)), keyEquivalent: "")
-        rawItem.target = self
-        rawItem.state = pipeline.usingRawUSB ? .on : .off
-        menu.addItem(rawItem)
-
-        let helperTitle = helperInstalled
-            ? "重新安装 / 更新 10G 采集卡直读组件… [已安装]"
-            : "安装 10G 采集卡直读组件（解锁满血 4K60 无损）…"
-        let installItem = NSMenuItem(title: helperTitle, action: #selector(menuInstallHelper(_:)), keyEquivalent: "")
-        installItem.target = self
-        installItem.isEnabled = !installingHelper
-        menu.addItem(installItem)
-
+        add(helperInstalled ? tr("重装直读组件…", "Reinstall USB Helper…") : tr("安装直读组件…", "Install USB Helper…"),
+            #selector(menuInstallHelper(_:)), enabled: !installingHelper)
         menu.addItem(.separator())
 
-        // 5. Audio & Gain
         let audOn = pipeline.isAudioEnabled
-        let audToggle = NSMenuItem(title: "播放采集卡声音", action: #selector(menuToggleAudio(_:)), keyEquivalent: "")
-        audToggle.target = self
-        audToggle.state = audOn ? .on : .off
-        menu.addItem(audToggle)
-
-        let gainSub = NSMenu(title: "音量放大")
+        add(tr("声音", "Audio"), #selector(menuToggleAudio(_:)), on: audOn)
         let curGain = pipeline.currentAudioGainDb
-        for (label, db) in [("不放大（+0 dB）", 0.0), ("适中（+12 dB）", 12.0), ("标准（+20 dB，默认）", 20.0), ("强（+26 dB）", 26.0)] {
-            let it = NSMenuItem(title: label, action: #selector(menuSelectAudioGain(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = NSNumber(value: db)
-            it.state = (audOn && abs(curGain - db) < 1.5) ? .on : .off
-            gainSub.addItem(it)
+        submenu(tr("音量", "Volume")) { sub in
+            for db in [0.0, 12.0, 20.0, 26.0] {
+                let label = "+\(Int(db)) dB" + (db == 20 ? tr("（默认）", " (default)") : "")
+                add(label, #selector(menuSelectAudioGain(_:)), on: audOn && abs(curGain - db) < 1.5, to: sub).representedObject = NSNumber(value: db)
+            }
         }
-        let gainParent = NSMenuItem(title: "音量放大（解决采集卡声音轻）", action: nil, keyEquivalent: "")
-        gainParent.submenu = gainSub
-        menu.addItem(gainParent)
-
         menu.addItem(.separator())
 
-        // 6. Diagnostics & Quit
-        let hudItem = NSMenuItem(title: "状态栏常显 (H)", action: #selector(menuToggleHud(_:)), keyEquivalent: "")
-        hudItem.target = self
-        hudItem.state = hudPinned ? .on : .off
-        menu.addItem(hudItem)
-
-        let sampleItem = NSMenuItem(title: "抓取最近 1 秒原画样本 (S)", action: #selector(menuSaveSample(_:)), keyEquivalent: "")
-        sampleItem.target = self
-        menu.addItem(sampleItem)
-
-        let logItem = NSMenuItem(title: "在访达中查看运行日志", action: #selector(menuRevealLog(_:)), keyEquivalent: "")
-        logItem.target = self
-        menu.addItem(logItem)
-
+        add(tr("状态条", "Stats"), #selector(menuToggleHud(_:)), key: "h", on: hudPinned)
+        add(tr("保存样本", "Save Sample"), #selector(menuSaveSample(_:)), key: "s")
+        add(tr("显示日志", "Show Log"), #selector(menuRevealLog(_:)))
+        submenu(tr("语言", "Language")) { sub in
+            for l in Lang.allCases {
+                add(l.name, #selector(menuSelectLanguage(_:)), on: l == Lang.current, to: sub).representedObject = l.rawValue
+            }
+        }
         menu.addItem(.separator())
-        let qItem = NSMenuItem(title: "退出 Maccap (Q)", action: #selector(menuQuit(_:)), keyEquivalent: "")
-        qItem.target = self
-        menu.addItem(qItem)
+        add(tr("退出", "Quit"), #selector(menuQuit(_:)), key: "q")
+    }
+
+    @objc private func menuToggleUpscale(_ sender: NSMenuItem) {
+        pipeline.toggleUpscale()
+        cardMenu.reload()
+    }
+
+    @objc private func menuSelectLanguage(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let l = Lang(rawValue: raw) { setLanguage(l) }
     }
 
     @objc private func menuSelectMode(_ sender: NSMenuItem) {
@@ -5153,7 +5117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard !runningBenchmark && !installingHelper else { return }
         runningBenchmark = true
         cardMenu.reload()
-        showStatus("正在实测本机芯片 4K / 2K / 1080p 补帧算力（约 3 秒）…", force: true)
+        showStatus(tr("测速中，约 3 秒…", "Benchmarking, about 3 s…"), force: true)
 
         DispatchQueue.global(qos: .userInitiated).async {
             self.pipeline.setBenchmarkPaused(true)
@@ -5171,13 +5135,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
                 let alert = NSAlert()
                 alert.alertStyle = .informational
-                alert.messageText = "本机接 PS5 补帧算力实测结果"
+                alert.messageText = tr("测速结果", "Benchmark Results")
                 alert.informativeText = rep.formattedSummary()
                 if rep.recommended != nil {
-                    alert.addButton(withTitle: "一键应用推荐档位")
-                    alert.addButton(withTitle: "保持当前设置")
+                    alert.addButton(withTitle: tr("应用推荐", "Apply"))
+                    alert.addButton(withTitle: tr("保持不变", "Keep Current"))
                 } else {
-                    alert.addButton(withTitle: "知道了")
+                    alert.addButton(withTitle: tr("好", "OK"))
                 }
 
                 let resp = alert.runModal()
@@ -5188,7 +5152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     self.pipeline.applyRecommendedPreset(mode: rec.mode, maxWidth: rec.maxWidth)
                     self.cardMenu.reload()
                 } else {
-                    self.showStatus("测算完成，保持当前模式：" + self.pipeline.mode.title, force: true)
+                    self.showStatus(tr("补帧：", "Interpolation: ") + self.pipeline.mode.title, force: true)
                 }
             }
         }
@@ -5208,7 +5172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func promptInstallUVCHelper(activateAfterInstall: Bool) {
         guard !installingHelper else { return }
         guard let installerPath = locateBundledHelperInstaller() else {
-            showStatus("未找到内置 10G 直读安装脚本", force: true)
+            showStatus(tr("找不到安装脚本", "Install script not found"), force: true)
             return
         }
         window?.level = .normal
@@ -5216,10 +5180,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "安装 10G 采集卡 USB 无损直读组件"
-        alert.informativeText = "针对 Realtek 0bda:0911 主控的 USB 3.2 10Gbps 采集卡，macOS 自带驱动会把每次读取切碎为 16KB，导致 4K60 掉帧。\n\n点击「授权安装」后，系统将请求管理员密码，把只读采集组件安装到 /usr/local/libexec/captureinterp-uvc-helper，解锁 256KB 大包满血 4K60 无损直读（无需打开终端或安装 Xcode）。"
-        alert.addButton(withTitle: "授权安装")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = tr("安装 USB 直读组件", "Install USB Helper")
+        alert.informativeText = tr("用于 Realtek 0bda:0911 芯片的 10 Gbps 采集卡。macOS 驱动把每次读取切成 16 KB，4K60 会丢帧。\n\n组件装到 /usr/local/libexec/captureinterp-uvc-helper，每次读 256 KB。安装需要管理员密码。",
+                                   "For 10 Gbps capture cards with the Realtek 0bda:0911 chip. The macOS driver splits each read into 16 KB, so 4K60 drops frames.\n\nThe helper installs to /usr/local/libexec/captureinterp-uvc-helper and reads 256 KB at a time. Installing asks for an admin password.")
+        alert.addButton(withTitle: tr("安装", "Install"))
+        alert.addButton(withTitle: tr("取消", "Cancel"))
         let choice = alert.runModal()
         guard choice == .alertFirstButtonReturn else {
             window?.level = desiredWindowLevel
@@ -5228,7 +5193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         installingHelper = true
         cardMenu.reload()
-        showStatus("正在等待管理员授权安装 10G 直读组件…", force: true)
+        showStatus(tr("等待管理员授权…", "Waiting for admin approval…"), force: true)
         let user = NSUserName()
         let appleScript = """
         on run argv
@@ -5265,15 +5230,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.window?.makeKeyAndOrderFront(nil)
                 if ok && RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok {
                     Log.shared.line("uvc helper installed via GUI")
-                    self.showStatus("10G 直读组件安装完成", force: true)
+                    self.showStatus(tr("直读组件已安装", "USB helper installed"), force: true)
                     if activateAfterInstall && !self.pipeline.usingRawUSB {
                         self.pipeline.setRawUSBEnabled(true)
                     }
                 } else if errMsg.contains("-128") || errMsg.localizedCaseInsensitiveContains("canceled") || errMsg.contains("取消") {
-                    self.showStatus("已取消安装 10G 直读组件", force: true)
+                    self.showStatus(tr("已取消安装", "Install canceled"), force: true)
                 } else {
                     Log.shared.line("uvc helper GUI install failed: \(errMsg)")
-                    self.showStatus("直读组件安装未完成，继续使用系统采集", force: true)
+                    self.showStatus(tr("安装失败，继续用系统采集", "Install failed. Staying on system capture"), force: true)
                 }
                 self.cardMenu.reload()
             }
@@ -5365,8 +5330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         pipeline.onStatus = { [weak self] text in
             guard let self else { return }
-            let important = text.hasPrefix("模式") || text.hasPrefix("锐化") || text.hasPrefix("放大") || text.hasPrefix("输入源") || text.hasPrefix("采集") || text.hasPrefix("分辨率") || text.hasPrefix("声音") || text.hasPrefix("音量") || text.hasPrefix("正在实测") || text.hasPrefix("已应用推荐") || text.hasPrefix("测算完成") || text.contains("断开") || text.contains("直读") || text.contains("自动直通") || text.contains("连接") || text.contains("未检测") || text.contains("2/3 档")
-            self.showStatus(text, force: important)
+            self.showStatus(text, force: true)
         }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             if e.modifierFlags.contains(.command) {
@@ -5427,9 +5391,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if !opts.file.isEmpty {
             guard pipeline.startFile(opts.file) else { NSApp.terminate(nil); return }
             pipeline.onStreamStateChange?(true)
-            showStatus("模式：" + pipeline.mode.title, force: true)
+            showStatus(tr("补帧：", "Interpolation: ") + pipeline.mode.title, force: true)
         } else if pipeline.start() {
-            showStatus("模式：" + pipeline.mode.title, force: true)
+            showStatus(tr("补帧：", "Interpolation: ") + pipeline.mode.title, force: true)
         } else {
             updateMenuVisibility()
             pipeline.startWaitingForDevice()

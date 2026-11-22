@@ -20,8 +20,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>100</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSCameraUsageDescription</key><string>读取采集卡或摄像头的画面用于实时补帧。Reads the capture card picture for frame interpolation.</string>
-<key>NSMicrophoneUsageDescription</key><string>播放采集卡送入的声音并与画面同步。Plays the capture card audio synchronized with the picture.</string>
+<key>NSCameraUsageDescription</key><string>读取采集卡画面用于补帧。Reads the capture card picture for frame interpolation.</string>
+<key>NSMicrophoneUsageDescription</key><string>播放采集卡的声音。Plays the capture card audio.</string>
 </dict></plist>
 PLIST
 
