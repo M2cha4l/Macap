@@ -14,6 +14,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>CaptureInterp</string>
 <key>CFBundleDisplayName</key><string>CaptureInterp</string>
 <key>CFBundleExecutable</key><string>CaptureInterp</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>
 <key>CFBundleVersion</key><string>100</string>
@@ -27,6 +28,7 @@ PLIST
 swift build -c release
 rm -f "$APP/Contents/MacOS/CaptureInterp" "$APP/Contents/MacOS/captureinterp-uvc-helper"
 cp .build/release/CaptureInterp "$APP/Contents/MacOS/CaptureInterp"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 if [[ -f tools/uvc_bulk_helper.c ]]; then
     clang -O2 -mmacosx-version-min=14.0 -Wall -Wextra -Werror tools/uvc_bulk_helper.c \
