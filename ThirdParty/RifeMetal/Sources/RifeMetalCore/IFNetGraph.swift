@@ -1043,6 +1043,10 @@ public final class IFNetGraph {
                          "timestep \(t) out of (0, 1)")
         }
 
+        let stageTrace = ProcessInfo.processInfo.environment["RIFE_STAGE_TRACE"] == "1" ? context.airServiceTraceCollector : nil
+        let traceT0 = mach_absolute_time()
+        stageTrace?.begin(jobID: 0, stage: 3)
+        defer { if let stageTrace { Self.printStageTrace(stageTrace, t0: traceT0) } }
         let verbose = ProcessInfo.processInfo.environment["RIFE_VERBOSE"] == "1"
         let dumpDir = ProcessInfo.processInfo.environment["RIFE_DUMP_DIR"]
         let benchStart = verbose ? DispatchTime.now() : nil
@@ -1576,6 +1580,23 @@ public final class IFNetGraph {
     }
 
     // MARK: - Per-stage debug dump (gated by RIFE_DUMP_DIR env var)
+
+    /// One stderr line per frame: for each command-buffer root, ms from frame start to
+    /// commit, GPU start, GPU end, and wait return, so CPU encode, queueing and GPU time separate.
+    private static func printStageTrace(_ c: AirServiceTraceCollector, t0: UInt64) {
+        var tb = mach_timebase_info_data_t(); mach_timebase_info(&tb)
+        let msPerTick = Double(tb.numer) / Double(tb.denom) / 1_000_000
+        let t0s = Double(t0) * msPerTick / 1000
+        let tick = { (t: UInt64) in t == 0 ? -1 : Double(t &- t0) * msPerTick }
+        var line = String(format: "[trace] end %.2f", tick(mach_absolute_time()))
+        for i in 0..<c.count {
+            let r = c.record(at: i)
+            let gs = r.validityMask & 16 != 0 ? (r.gpuStartSeconds - t0s) * 1000 : -1
+            let ge = r.validityMask & 16 != 0 ? (r.gpuEndSeconds - t0s) * 1000 : -1
+            line += String(format: " | k%d commit %.2f gpu %.2f-%.2f wait %.2f", r.commitKind, tick(r.commitBeginHostTicks), gs, ge, tick(r.waitEndHostTicks))
+        }
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
 
     private static func tensorDataToFloat32(_ td: MPSGraphTensorData) -> [Float] {
         let shape = td.shape
