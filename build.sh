@@ -1,19 +1,19 @@
 #!/bin/zsh
-# Build standalone CaptureInterp.app next to this script (macOS 14.0+ Apple Silicon).
+# Build standalone Maccap.app next to this script (macOS 14.0+ Apple Silicon).
 # Resource bundles and the prebuilt 10G UVC helper are embedded inside Contents/Resources,
-# so CaptureInterp.app can be moved to /Applications or packaged into a .dmg without .build.
+# so Maccap.app can be moved to /Applications or packaged into a .dmg without .build.
 set -euo pipefail
 cd "$(dirname "$0")"
-APP=CaptureInterp.app
+APP=Maccap.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/helper"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>io.captureinterp.app</string>
-<key>CFBundleName</key><string>CaptureInterp</string>
-<key>CFBundleDisplayName</key><string>CaptureInterp</string>
-<key>CFBundleExecutable</key><string>CaptureInterp</string>
+<key>CFBundleName</key><string>Maccap</string>
+<key>CFBundleDisplayName</key><string>Maccap</string>
+<key>CFBundleExecutable</key><string>Maccap</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>
@@ -26,8 +26,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 swift build -c release
-rm -f "$APP/Contents/MacOS/CaptureInterp" "$APP/Contents/MacOS/captureinterp-uvc-helper"
-cp .build/release/CaptureInterp "$APP/Contents/MacOS/CaptureInterp"
+rm -f "$APP/Contents/MacOS/Maccap" "$APP/Contents/MacOS/captureinterp-uvc-helper"
+cp .build/release/Maccap "$APP/Contents/MacOS/Maccap"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 if [[ -f tools/uvc_bulk_helper.c ]]; then
@@ -42,7 +42,7 @@ find "$APP/Contents/Resources" -maxdepth 1 -name '*.bundle' -exec rm -rf {} +
 cp -R .build/release/*.bundle "$APP/Contents/Resources/"
 
 if [[ "${CLEAN_DIST_BUILD:-0}" == "1" ]]; then
-    strip -x "$APP/Contents/MacOS/CaptureInterp"
+    strip -x "$APP/Contents/MacOS/Maccap"
     if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
         strip -x "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
     fi

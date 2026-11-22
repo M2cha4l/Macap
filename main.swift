@@ -1,10 +1,10 @@
 import Accelerate
-// CaptureInterp: capture device (UVC capture card / camera) -> Apple low-latency
+// Maccap: capture device (UVC capture card / camera) -> Apple low-latency
 // frame interpolation (X2) -> fixed-cadence presentation. No screen capture.
 //
 // Usage (inside the .app bundle):
-//   CaptureInterp --list
-//   CaptureInterp [--device <name substring>] [--screen <index>] [--offset <ms>]
+//   Maccap --list
+//   Maccap [--device <name substring>] [--screen <index>] [--offset <ms>]
 //                 [--no-interp] [--audio <name substring>] [--log <path>] [--seconds <n>]
 import AppKit
 import AVFoundation
@@ -2324,7 +2324,7 @@ final class RawUVCCapture {
             print(rep.formattedSummary())
         }
 
-        print(String(format: "CaptureInterp selftest: PASS (ownership, Mach ring, non-propagating lease, fused-NV12 diff=%.2f, fast-fail=%.1f ms, delivery=%.2f ms)", colorDelta, fastMs, measuredDelivMs))
+        print(String(format: "Maccap selftest: PASS (ownership, Mach ring, non-propagating lease, fused-NV12 diff=%.2f, fast-fail=%.1f ms, delivery=%.2f ms)", colorDelta, fastMs, measuredDelivMs))
         return true
     }
 }
@@ -4573,7 +4573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "需要摄像头权限才能读取 PS5 采集卡画面"
-        alert.informativeText = "免驱 HDMI 采集卡在 macOS 中识别为外接摄像头。\n请在「系统设置 → 隐私与安全性 → 摄像头」中勾选 CaptureInterp，然后重新打开本应用。"
+        alert.informativeText = "免驱 HDMI 采集卡在 macOS 中识别为外接摄像头。\n请在「系统设置 → 隐私与安全性 → 摄像头」中勾选 Maccap，然后重新打开本应用。"
         alert.addButton(withTitle: "打开系统设置")
         alert.addButton(withTitle: "退出")
         if alert.runModal() == .alertFirstButtonReturn,
@@ -4625,7 +4625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             window.collectionBehavior = [.managed]
             window.styleMask = windowedStyleMask
             window.titlebarAppearsTransparent = true
-            window.title = "CaptureInterp — 苹果电脑接 PS5 实时补帧"
+            window.title = "Maccap"
             window.isMovableByWindowBackground = true
             let restore = savedWindowedFrame ?? defaultWindowedRect(on: screen)
             window.setFrame(restore, display: true)
@@ -4824,13 +4824,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 CaptureInterp", action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "关于 Maccap", action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let hideItem = NSMenuItem(title: "隐藏 CaptureInterp", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideItem = NSMenuItem(title: "隐藏 Maccap", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hideItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(hideItem)
         appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "退出 CaptureInterp", action: #selector(menuQuit(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 Maccap", action: #selector(menuQuit(_:)), keyEquivalent: "q")
         quitItem.target = self
         quitItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(quitItem)
@@ -4857,7 +4857,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func buildPopupSettingsMenu() -> NSMenu {
-        let m = NSMenu(title: "CaptureInterp 设置")
+        let m = NSMenu(title: "Maccap 设置")
         populateSettingsMenu(m)
         return m
     }
@@ -5057,7 +5057,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(logItem)
 
         menu.addItem(.separator())
-        let qItem = NSMenuItem(title: "退出 CaptureInterp (Q)", action: #selector(menuQuit(_:)), keyEquivalent: "")
+        let qItem = NSMenuItem(title: "退出 Maccap (Q)", action: #selector(menuQuit(_:)), keyEquivalent: "")
         qItem.target = self
         menu.addItem(qItem)
     }
@@ -5299,7 +5299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         window.backgroundColor = NSColor(calibratedWhite: 0.06, alpha: 1.0)
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-        window.title = "CaptureInterp — 苹果电脑接 PS5 实时补帧"
+        window.title = "Maccap"
         window.minSize = NSSize(width: 780, height: 540)
         window.delegate = self
 
@@ -5437,4 +5437,5 @@ let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(ProcessInfo.processInfo.environment["CI_HEADLESS"] == "1" ? .prohibited : .regular)
+if let icon = Bundle.main.image(forResource: "AppIcon") { app.applicationIconImage = icon }   // Dock shows the icon even when Launch Services still caches an older build
 app.run()

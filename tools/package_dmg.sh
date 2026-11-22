@@ -1,18 +1,18 @@
 #!/bin/zsh
-# Build a standalone, relocatable, privacy-verified CaptureInterp.dmg for Apple Silicon Macs (macOS 14.0+).
+# Build a standalone, relocatable, privacy-verified Maccap.dmg for Apple Silicon Macs (macOS 14.0+).
 #
 # Pre-release gates enforced automatically:
 #   1. privacy_scan.py --selftest (red-then-green guard verification)
 #   2. Clean-room build inside /tmp/captureinterp-dist-XXXXXX so zero /Users/<name> paths enter .build or Mach-O
 #   3. Standalone --selftest (plus 4K/2K/1080p hardware benchmark verification) AFTER deleting .build completely
-#   4. Full binary + bundle + archive privacy scan on source tree, CaptureInterp.app, and final .dmg
+#   4. Full binary + bundle + archive privacy scan on source tree, Maccap.app, and final .dmg
 #   5. Optional Apple notarization + stapling when Developer ID Application + NOTARY_PROFILE are configured
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DIST_DIR="${1:-$REPO_ROOT/../CaptureInterp-public/dist}"
-DMG_NAME="CaptureInterp-v1.0.0-macOS-arm64.dmg"
+DIST_DIR="${1:-$REPO_ROOT/../Maccap-public/dist}"
+DMG_NAME="Maccap-v1.0.0-macOS-arm64.dmg"
 DMG_OUT="$DIST_DIR/$DMG_NAME"
 
 echo "==> [1/7] Running privacy guard self-test..."
@@ -21,7 +21,7 @@ python3 "$REPO_ROOT/tools/privacy_scan.py" --selftest
 WORK_DIR="$(/usr/bin/mktemp -d /tmp/captureinterp-dist.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-CLEAN_SRC="$WORK_DIR/CaptureInterp-src"
+CLEAN_SRC="$WORK_DIR/Maccap-src"
 echo "==> [2/7] Exporting clean source tree into $CLEAN_SRC..."
 if [[ -d "$REPO_ROOT/ThirdParty/RifeMetal" && ! -d "$REPO_ROOT/public" ]]; then
     mkdir -p "$CLEAN_SRC"
@@ -33,21 +33,21 @@ fi
 echo "==> [3/7] Scanning exported source tree for privacy leaks..."
 python3 "$REPO_ROOT/tools/privacy_scan.py" "$CLEAN_SRC"
 
-echo "==> [4/7] Building standalone Release CaptureInterp.app in clean room..."
+echo "==> [4/7] Building standalone Release Maccap.app in clean room..."
 (
     cd "$CLEAN_SRC"
     CLEAN_DIST_BUILD=1 ./build.sh
 )
 
-APP_PATH="$CLEAN_SRC/CaptureInterp.app"
+APP_PATH="$CLEAN_SRC/Maccap.app"
 
 echo "==> [5/7] Deleting .build and verifying 100% standalone execution + hardware tier benchmark..."
 rm -rf "$CLEAN_SRC/.build"
-CI_BENCH_ALL=1 "$APP_PATH/Contents/MacOS/CaptureInterp" --selftest
+CI_BENCH_ALL=1 "$APP_PATH/Contents/MacOS/Maccap" --selftest
 "$APP_PATH/Contents/Resources/helper/captureinterp-uvc-helper" --selftest
 
 if command -v vtool >/dev/null 2>&1; then
-    MIN_OS="$(vtool -show-build "$APP_PATH/Contents/MacOS/CaptureInterp" | awk '/minos/{print $2; exit}')"
+    MIN_OS="$(vtool -show-build "$APP_PATH/Contents/MacOS/Maccap" | awk '/minos/{print $2; exit}')"
     if [[ "$MIN_OS" != "14.0" ]]; then
         echo "ERROR: Expected Mach-O minos 14.0, got '${MIN_OS:-unknown}'" >&2
         exit 1
@@ -56,31 +56,31 @@ fi
 
 DEV_ID=$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/{print $2; exit}')
 if [[ -n "$DEV_ID" && -n "${NOTARY_PROFILE:-}" ]]; then
-    echo "==> Submitting CaptureInterp.app for Apple notarization (profile: $NOTARY_PROFILE)..."
-    NOTARY_ZIP="$WORK_DIR/CaptureInterp-notary.zip"
+    echo "==> Submitting Maccap.app for Apple notarization (profile: $NOTARY_PROFILE)..."
+    NOTARY_ZIP="$WORK_DIR/Maccap-notary.zip"
     /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
     xcrun notarytool submit "$NOTARY_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
     xcrun stapler staple "$APP_PATH"
     rm -f "$NOTARY_ZIP"
 fi
 
-echo "==> [6/7] Scanning CaptureInterp.app for privacy leaks..."
+echo "==> [6/7] Scanning Maccap.app for privacy leaks..."
 python3 "$REPO_ROOT/tools/privacy_scan.py" "$APP_PATH"
 
 STAGE_DIR="$WORK_DIR/dmg_stage"
 mkdir -p "$STAGE_DIR" "$DIST_DIR"
-cp -R "$APP_PATH" "$STAGE_DIR/CaptureInterp.app"
+cp -R "$APP_PATH" "$STAGE_DIR/Maccap.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 
 cat > "$STAGE_DIR/使用说明（PS5必读）.txt" <<'TXT'
-CaptureInterp v1.0.0 — 苹果电脑外接 PS5 实时补帧播放器（30 → 60 帧）
+Maccap v1.0.0
 适用电脑：搭载 Apple Silicon（M1 / M2 / M3 / M4 / M5 全系芯片）的 Mac，系统 macOS 14.0 或更新（不支持老款 Intel Mac）
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【一、安装与首次打开】
-1. 把「CaptureInterp.app」拖进右侧「Applications（应用程序）」文件夹。
+1. 把「Maccap.app」拖进右侧「Applications（应用程序）」文件夹。
 2. 首次打开若提示“未验证开发者”：
-   - 在「应用程序」中按住 Control 键（或点鼠标右键）点击 CaptureInterp.app → 选择「打开」；
+   - 在「应用程序」中按住 Control 键（或点鼠标右键）点击 Maccap.app → 选择「打开」；
    - 若系统仍拦截，打开「系统设置 → 隐私与安全性」，拉到底部点击「仍要打开」（仅首次需要）。
 3. 首次运行请允许「摄像头」和「麦克风」权限（免驱 HDMI 采集卡在 macOS 中识别为外接摄像头与麦克风）。
 
@@ -123,7 +123,7 @@ TXT
 rm -f "$DMG_OUT"
 echo "==> [7/7] Creating compressed disk image $DMG_OUT and running final privacy scan..."
 hdiutil create \
-    -volname "CaptureInterp" \
+    -volname "Maccap" \
     -srcfolder "$STAGE_DIR" \
     -ov \
     -format UDZO \

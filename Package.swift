@@ -1,11 +1,11 @@
 // swift-tools-version: 5.10
-// CaptureInterp: single-file app plus the vendored RifeMetal package (GPU frame interpolation).
+// Maccap: single-file app plus the vendored RifeMetal package (GPU frame interpolation).
 import PackageDescription
 let package = Package(
-    name: "CaptureInterp",
+    name: "Maccap",
     platforms: [.macOS(.v14)],
     dependencies: [.package(path: "ThirdParty/RifeMetal")],
-    targets: [.executableTarget(name: "CaptureInterp",
+    targets: [.executableTarget(name: "Maccap",
                                 dependencies: [.product(name: "RifeMetal", package: "RifeMetal")],
                                 path: ".", sources: ["main.swift"],
                                 swiftSettings: [.unsafeFlags(["-swift-version", "5"])])]
