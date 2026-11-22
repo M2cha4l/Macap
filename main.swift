@@ -3960,7 +3960,7 @@ struct MenuItem {
     let note: (Int) -> String
 }
 
-/// Colors and sizes of the prototypes (Shelf.dc.html, Playing.dc.html), which are drawn on a 1280x720 artboard.
+/// Colors and sizes of the chosen UI prototype, which is drawn on a 1280x720 artboard.
 enum Look {
     static func rgb(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
         CGColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: a)
@@ -4030,7 +4030,7 @@ enum Look {
         return ctx.makeImage()!
     }()
 
-    /// Same drawing as tools/make_icon.swift: the prototype SVG (viewBox 256, y down).
+    /// Same drawing as tools/make_icon.swift (prototype SVG coordinates: viewBox 256, y down).
     static func drawMaccapIcon(_ ctx: CGContext, size: CGFloat) {
         let k = size / 256
         ctx.saveGState()
@@ -4121,7 +4121,6 @@ final class CardMenuView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override var isFlipped: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     private var s: CGFloat { Look.scale(bounds.height) }
@@ -4376,7 +4375,7 @@ final class CardMenuView: NSView {
     }
 }
 
-/// Top-right toast of Playing.dc.html: icon, bold first line, grey second line. Hides 2 s after the last show.
+/// Top-right toast: icon, bold first line, grey second line. Hides 2 s after the last show.
 final class ToastView: NSView {
     private let iconLayer = CALayer()
     private let titleLayer = Look.textLayer(wrapped: true)
@@ -4436,7 +4435,7 @@ final class ToastView: NSView {
     }
 }
 
-/// Bottom-left stats pill of Playing.dc.html. `nil` hides it.
+/// Bottom-left stats pill. `nil` hides it.
 final class StatsPillView: NSView {
     private let textLayer = Look.textLayer()
 
