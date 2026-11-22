@@ -17,7 +17,7 @@ public final class PaddedFrameConvert {
         }
         let library: MTLLibrary
         do {
-            library = try device.makeDefaultLibrary(bundle: resBundle)
+            library = try RifeResourceBundle.library(device: device, bundle: resBundle, shader: "PaddedFrameConvert")
         } catch {
             throw PaddedFrameConvertError.pipelineCompilationFailed("library load failed: \(error)")
         }
