@@ -3264,6 +3264,13 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         return upscaler.upscale(pb, to: (even(w * k), even(h * k))) ?? pb
     }
 
+    func toggleUpscale() {
+        let m: UpscaleMode = upscaler.mode == .off ? .metalfx : .off
+        upscaler.mode = m
+        Log.shared.line("upscale: \(m.rawValue)")
+        DispatchQueue.main.async { self.onStatus?(m == .off ? "放大：关（显示层拉伸）　　按 X 切换" : "放大：MetalFX 空间放大　　按 X 切换") }
+    }
+
     func cycleSharpness() {
         sharpLock.lock(); let cur = casStrength; sharpLock.unlock()
         if cur < 0.2 { setSharpness(0.55) }
@@ -5139,7 +5146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         pipeline.onStatus = { [weak self] text in
             guard let self else { return }
-            let important = text.hasPrefix("模式") || text.hasPrefix("锐化") || text.hasPrefix("输入源") || text.hasPrefix("采集") || text.hasPrefix("分辨率") || text.hasPrefix("声音") || text.hasPrefix("音量") || text.hasPrefix("正在实测") || text.hasPrefix("已应用推荐") || text.hasPrefix("测算完成") || text.contains("断开") || text.contains("直读") || text.contains("自动直通") || text.contains("连接") || text.contains("未检测") || text.contains("2/3 档")
+            let important = text.hasPrefix("模式") || text.hasPrefix("锐化") || text.hasPrefix("放大") || text.hasPrefix("输入源") || text.hasPrefix("采集") || text.hasPrefix("分辨率") || text.hasPrefix("声音") || text.hasPrefix("音量") || text.hasPrefix("正在实测") || text.hasPrefix("已应用推荐") || text.hasPrefix("测算完成") || text.contains("断开") || text.contains("直读") || text.contains("自动直通") || text.contains("连接") || text.contains("未检测") || text.contains("2/3 档")
             self.showStatus(text, force: important)
         }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
@@ -5163,6 +5170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             case "5": self.pipeline.setMode(.rifeBalanced); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
             case "6": self.pipeline.setMode(.rifeMedium); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
             case "k": self.pipeline.cycleSharpness(); self.syncControlPanelUI(); return nil
+            case "x": self.pipeline.toggleUpscale(); return nil
             case "u": self.menuToggleRawUSB(NSMenuItem()); return nil
             case "s":
                 self.pipeline.collector.saveManual { [weak self] msg in self?.showStatus(msg, force: true) }
