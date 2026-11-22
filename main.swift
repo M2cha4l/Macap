@@ -77,6 +77,7 @@ struct Options {
     var sharpnessExplicit = false
     var fullscreen = false   // --fullscreen: start directly in borderless fullscreen mode
     var upscale = UpscaleMode.off
+    var openMenu = false     // --open-menu: open the card-row menu right after launch (screenshots, timing)
 }
 
 enum UpscaleMode: String { case off, metalfx }
@@ -149,6 +150,7 @@ func parseOptions() -> Options {
         case "--audio-gain": o.audioGainDb = Double(it.next() ?? "") ?? 0; o.audioGainExplicit = true
         case "--sharpness": o.sharpness = min(1.0, max(0.0, Double(it.next() ?? "") ?? 0.55)); o.sharpnessExplicit = true
         case "--fullscreen": o.fullscreen = true
+        case "--open-menu": o.openMenu = true
         case "--upscale": o.upscale = UpscaleMode(rawValue: it.next() ?? "") ?? .off
         case "--grid":
             let v = (0..<6).map { _ in Int(it.next() ?? "") ?? 0 }
@@ -5421,6 +5423,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } else {
             updateMenuVisibility()
             pipeline.startWaitingForDevice()
+        }
+        if opts.openMenu {
+            menuOverVideo = true
+            updateMenuVisibility()
         }
         if opts.seconds > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + opts.seconds) { NSApp.terminate(nil) }
