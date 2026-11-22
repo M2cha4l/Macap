@@ -3386,12 +3386,16 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 if wait > 0 { usleep(useconds_t(wait * 1_000_000)) }
                 else if wait < -0.1 { next = CMTimeGetSeconds(hostNow()) }   // after a stall, resume the cadence instead of bursting
                 autoreleasepool {
-                    let now = hostNow()
-                    self.handle(pb, pts: now, arrival: now)   // a device with zero delivery delay
+                    // A real card stamps the capture time, so a slow previous frame does not stretch the gap
+                    // between pictures. Stamping `now` let one slow frame look like a held picture, which made
+                    // the next frame slower still.
+                    let pts = CMTime(seconds: next, preferredTimescale: 1_000_000_000)
+                    self.handle(pb, pts: pts, arrival: hostNow())
                 }
                 next += interval
             }
         }
+        notifyStreamActive(true)   // behave like a live device: the control card hides over video, so file benchmarks match real play
         return true
     }
 
@@ -3407,6 +3411,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     /// Make sure the sessions needed by the current mode exist.
     private var rifeEngines: [Mode: RifeEngine] = [:]
+    private var perPictureMs: [Mode: Double] = [:]   // smoothed RIFE time per in-between picture, per tier
     private var rifeFailed = false
     private var rifeDebugCount = 0
     private var longGaps = 0, earlyShown = 0
@@ -3745,9 +3750,11 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             var customSteps: [Float]? = nil
             if (refreshes == 3 || refreshes == 4) && opts.multiMid {
                 longGaps += 1
-                // Fast & Medium ("4.5") tiers finish fast enough to generate 2 in-between frames within 33 ms;
-                // Balanced takes ~21 ms so generates 1 frame at the exact 2/3 or 3/4 timestamp.
-                let affordTwo = (mode == .rifeFast || mode == .rifeMedium)
+                // Two in-between pictures must both finish before the next picture arrives (one 30 fps slot, less
+                // headroom), judged from this machine's measured time per picture. Otherwise one at 2/3 or 3/4:
+                // two pictures that overrun the slot delay the next frame, which then looks like another held picture.
+                let perPic = perPictureMs[mode] ?? 0
+                let affordTwo = (mode == .rifeFast || mode == .rifeMedium) && perPic > 0 && 2 * perPic <= 1000.0 / 30.0 - 6.0
                 customSteps = affordTwo
                     ? [Float(refreshes - 2) / Float(refreshes), Float(refreshes - 1) / Float(refreshes)]
                     : [Float(refreshes - 1) / Float(refreshes)]
@@ -3759,6 +3766,11 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 shown = bgra
                 defer { rifePrevBGRA = bgra }
                 if useGPUProtect { lastProtectMs = 0.0 }
+                if !res.mids.isEmpty {
+                    let ms = rife.lastEngineMs / Double(res.mids.count)
+                    let old = perPictureMs[mode] ?? 0
+                    perPictureMs[mode] = old == 0 ? ms : old * 0.9 + ms * 0.1
+                }
 
                 var pushed: CVPixelBuffer? = nil
                 if res.mids.count == 2 {
