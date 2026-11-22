@@ -16,6 +16,7 @@ import CoreImage
 import Darwin.Mach
 import IOSurface
 import Metal
+import MetalFX
 
 // MARK: - Arguments
 
@@ -75,7 +76,10 @@ struct Options {
     var sharpness = 0.55     // Contrast-Adaptive Sharpening (0 = off, 0.55 = standard 5K crisp, 0.90 = strong; key K toggles)
     var sharpnessExplicit = false
     var fullscreen = false   // --fullscreen: start directly in borderless fullscreen mode
+    var upscale = UpscaleMode.off
 }
+
+enum UpscaleMode: String { case off, metalfx }
 
 enum Prefs {
     static let enabled: Bool = {
@@ -145,6 +149,7 @@ func parseOptions() -> Options {
         case "--audio-gain": o.audioGainDb = Double(it.next() ?? "") ?? 0; o.audioGainExplicit = true
         case "--sharpness": o.sharpness = min(1.0, max(0.0, Double(it.next() ?? "") ?? 0.55)); o.sharpnessExplicit = true
         case "--fullscreen": o.fullscreen = true
+        case "--upscale": o.upscale = UpscaleMode(rawValue: it.next() ?? "") ?? .off
         case "--grid":
             let v = (0..<6).map { _ in Int(it.next() ?? "") ?? 0 }
             if v.allSatisfy({ $0 > 0 }) { o.grid = Grid(cols: v[0], rows: v[1], tileW: v[2], tileH: v[3], overlapX: v[4], overlapY: v[5]); o.tiles = v[0] * v[1]; o.modeExplicit = true }
@@ -389,6 +394,85 @@ func percentile(_ v: [Double], _ p: Double) -> Double {
     guard !v.isEmpty else { return -1 }
     let s = v.sorted()
     return s[min(s.count - 1, Int((Double(s.count - 1) * p).rounded(.up)))]
+}
+
+/// MetalFX spatial upscale of a displayed BGRA frame to the display's pixel size, in place of the display layer's plain stretch.
+final class SpatialUpscaler {
+    private let lock = NSLock()
+    private var _mode: UpscaleMode
+    var mode: UpscaleMode {
+        get { lock.lock(); defer { lock.unlock() }; return _mode }
+        set { lock.lock(); _mode = newValue; lock.unlock() }
+    }
+    private let device = MTLCreateSystemDefaultDevice()
+    private lazy var queue = device?.makeCommandQueue()
+    private var cache: CVMetalTextureCache?
+    private var scaler: MTLFXSpatialScaler?
+    private var scaled: MTLTexture?   // the scaler only writes private-storage textures, so it scales here and blits into the IOSurface
+    private var pool: BufferPool?
+    private(set) var key = (inW: 0, inH: 0, outW: 0, outH: 0)
+    private var failed = false
+    private(set) var lastSkip = "no frame yet"
+    var gpuMs: [Double] = [], wallMs: [Double] = []
+
+    init(mode: UpscaleMode) {
+        _mode = mode
+        if let device { CVMetalTextureCacheCreate(nil, nil, device, nil, &cache) }
+        Log.shared.line("upscale: \(mode.rawValue)")
+    }
+
+    /// nil = show the source unchanged (off, not BGRA, not smaller than the target, or a Metal failure).
+    func upscale(_ src: CVPixelBuffer, to target: (w: Int, h: Int)) -> CVPixelBuffer? {
+        guard mode == .metalfx else { return nil }
+        let inW = CVPixelBufferGetWidth(src), inH = CVPixelBufferGetHeight(src)
+        guard CVPixelBufferGetPixelFormatType(src) == kCVPixelFormatType_32BGRA else { lastSkip = "source not 32BGRA"; return nil }
+        guard target.w > inW && target.h > inH else { lastSkip = "target \(target.w)x\(target.h) not larger than \(inW)x\(inH)"; return nil }
+        let t0 = CACurrentMediaTime()
+        guard let device, let queue, let cache else { return fail("no Metal device") }
+        if key != (inW, inH, target.w, target.h) {
+            key = (inW, inH, target.w, target.h); scaler = nil; scaled = nil; pool = nil
+            let d = MTLFXSpatialScalerDescriptor()
+            d.inputWidth = inW; d.inputHeight = inH; d.outputWidth = target.w; d.outputHeight = target.h
+            d.colorTextureFormat = .bgra8Unorm; d.outputTextureFormat = .bgra8Unorm
+            d.colorProcessingMode = .perceptual   // frames hold sRGB-encoded values
+            guard let s = d.makeSpatialScaler(device: device) else { return fail("makeSpatialScaler \(inW)x\(inH)->\(target.w)x\(target.h)") }
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: target.w, height: target.h, mipmapped: false)
+            td.storageMode = .private; td.usage = s.outputTextureUsage
+            guard let tex = device.makeTexture(descriptor: td) else { return fail("output texture") }
+            scaler = s; scaled = tex
+            pool = BufferPool(width: target.w, height: target.h, format: kCVPixelFormatType_32BGRA, attrs: [kCVPixelBufferMetalCompatibilityKey as String: true])
+            Log.shared.line("upscale: metalfx scaler \(inW)x\(inH)->\(target.w)x\(target.h)")
+        }
+        guard let scaler, let scaled, let pool else { return nil }   // this size already failed and was logged
+        guard let out = pool.get() else { return fail("output buffer") }
+        guard let inT = texture(src, cache, scaler.colorTextureUsage), let outT = texture(out, cache, [.shaderRead]),
+              let inTex = CVMetalTextureGetTexture(inT), let outTex = CVMetalTextureGetTexture(outT),
+              let cb = queue.makeCommandBuffer() else { return fail("textures") }
+        scaler.colorTexture = inTex; scaler.outputTexture = scaled
+        scaler.inputContentWidth = inW; scaler.inputContentHeight = inH
+        scaler.encode(commandBuffer: cb)
+        guard let blit = cb.makeBlitCommandEncoder() else { return fail("blit encoder") }
+        blit.copy(from: scaled, to: outTex); blit.endEncoding()
+        cb.commit(); cb.waitUntilCompleted()
+        guard cb.status == .completed else { return fail("command buffer \(cb.error.map { "\($0)" } ?? "status \(cb.status.rawValue)")") }
+        gpuMs.append((cb.gpuEndTime - cb.gpuStartTime) * 1000)
+        wallMs.append((CACurrentMediaTime() - t0) * 1000)
+        copyColor(from: src, to: out)
+        return out
+    }
+
+    private func texture(_ pb: CVPixelBuffer, _ cache: CVMetalTextureCache, _ usage: MTLTextureUsage) -> CVMetalTexture? {
+        var t: CVMetalTexture?
+        let attrs = [kCVMetalTextureUsage as String: NSNumber(value: usage.rawValue)] as CFDictionary
+        guard CVMetalTextureCacheCreateTextureFromImage(nil, cache, pb, attrs, .bgra8Unorm, CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb), 0, &t) == kCVReturnSuccess else { return nil }
+        return t
+    }
+
+    private func fail(_ why: String) -> CVPixelBuffer? {
+        lastSkip = why
+        if !failed { failed = true; Log.shared.line("upscale failed: \(why); showing frames unscaled") }
+        return nil
+    }
 }
 
 // MARK: - Interpolator (Apple low-latency frame interpolation at <= 1280x720)
@@ -3161,6 +3245,25 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async { self.onStatus?(note) }
     }
 
+    let upscaler = SpatialUpscaler(mode: opts.upscale)
+    private let targetLock = NSLock()
+    private var layerPx = (w: 0, h: 0)
+
+    /// Main thread, after every change of the layer's size or scale; the frame queue reads it to size the upscale.
+    func updateDisplayTarget() {
+        let b = layer.bounds.size, s = layer.contentsScale
+        targetLock.lock(); layerPx = (Int(b.width * s), Int(b.height * s)); targetLock.unlock()
+    }
+
+    private func upscaled(_ pb: CVPixelBuffer) -> CVPixelBuffer {
+        targetLock.lock(); let px = layerPx; targetLock.unlock()
+        let w = Double(CVPixelBufferGetWidth(pb)), h = Double(CVPixelBufferGetHeight(pb))
+        guard px.w > 0, px.h > 0, w > 0, h > 0 else { return pb }
+        let k = min(Double(px.w) / w, Double(px.h) / h)
+        let even = { (v: Double) in Int((v / 2).rounded()) * 2 }
+        return upscaler.upscale(pb, to: (even(w * k), even(h * k))) ?? pb
+    }
+
     func cycleSharpness() {
         sharpLock.lock(); let cur = casStrength; sharpLock.unlock()
         if cur < 0.2 { setSharpness(0.55) }
@@ -3350,7 +3453,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         if layer.status == .failed { layer.flush() }
         if noDisplayDebug { lastEnqueued = t; return t }     // diagnosis only (CI_NO_DISPLAY=1): how much does putting pictures on screen slow the GPU model down?
-        if let sb = makeSample(pb, pts: t) { layer.enqueue(sb) }
+        if let sb = makeSample(upscaled(pb), pts: t) { layer.enqueue(sb) }
         lastEnqueued = t
         return t
     }
@@ -3527,7 +3630,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             audio?.setDelay(0)                          // picture is not held, so neither is the sound
             // Pass-through: no waiting at all, show the frame as soon as it arrives.
             if layer.status == .failed { layer.flush() }
-            if let sb = makeSample(pb, pts: arrival) {
+            if let sb = makeSample(upscaled(pb), pts: arrival) {
                 if let arr = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true), CFArrayGetCount(arr) > 0 {
                     let d = unsafeBitCast(CFArrayGetValueAtIndex(arr, 0), to: CFMutableDictionary.self)
                     CFDictionarySetValue(d, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
@@ -3785,6 +3888,13 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         if srcIs60 && !opts.legacyPick { Log.shared.line("   picked half: \(pickParity), switches so far \(paritySwitches) | long gaps (50-67 ms) \(longGaps), filled with two pictures \(earlyShown) | picks so far by gap 25:\(pickGaps[0]) 33:\(pickGaps[1]) 42:\(pickGaps[2]) 50+:\(pickGaps[3]), same picture taken again \(samePictureAgain), repeat noise \(String(format: "%.3f", noiseFloor))") }
         if let r = rifeEngines[mode] { Log.shared.line(String(format: "   stages: convert %.1f engine %.1f protect %.1f ms", r.lastConvertMs, r.lastEngineMs, lastProtectMs)) }
+        if upscaler.mode == .metalfx {
+            let u = upscaler, k = u.key
+            if u.gpuMs.isEmpty { Log.shared.line("   upscale: none this period (\(u.lastSkip))") }
+            else { Log.shared.line(String(format: "   upscale %dx%d->%dx%d gpu p50 %.2f p95 %.2f wall p50 %.2f p95 %.2f ms (%d pictures)", k.inW, k.inH, k.outW, k.outH,
+                                          percentile(u.gpuMs, 0.5), percentile(u.gpuMs, 0.95), percentile(u.wallMs, 0.5), percentile(u.wallMs, 0.95), u.gpuMs.count)) }
+        }
+        upscaler.gpuMs.removeAll(keepingCapacity: true); upscaler.wallMs.removeAll(keepingCapacity: true)
         if let sp = stillProtector { Log.shared.line(String(format: "   protect split: textures %.2f | submit-to-done %.2f (queued before GPU start %.2f, GPU run %.2f) ms", sp.splitTexMs, sp.splitWaitMs, sp.splitQueuedMs, sp.splitGpuMs)) }
         if let r = rifeEngines[mode], !r.engineSamples.isEmpty {
             Log.shared.line(String(format: "   stages all pictures: convert p50 %.1f p95 %.1f | engine p50 %.1f p95 %.1f max %.1f ms (%d pictures)",
@@ -4019,6 +4129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         contentView.layer?.contentsScale = screen.backingScaleFactor
         pipeline.layer.contentsScale = screen.backingScaleFactor
         pipeline.layer.frame = contentView.bounds
+        pipeline.updateDisplayTarget()
         window.makeKeyAndOrderFront(nil)
         syncControlPanelUI()
         updateOverlayVisibility()
@@ -4030,6 +4141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         CATransaction.setDisableActions(true)
         pipeline.layer.frame = contentView.bounds
         CATransaction.commit()
+        pipeline.updateDisplayTarget()
     }
 
     private func moveToScreen(_ screen: NSScreen, savePref: Bool) {
@@ -4045,6 +4157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         contentView.layer?.contentsScale = screen.backingScaleFactor
         pipeline.layer.contentsScale = screen.backingScaleFactor
         pipeline.layer.frame = contentView.bounds
+        pipeline.updateDisplayTarget()
         attachDisplayLink(to: screen)
         showStatus("输出显示器：\(screen.localizedName)", force: true)
     }
@@ -4992,6 +5105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         view.layer?.contentsScale = screen.backingScaleFactor
         pipeline.layer.contentsScale = screen.backingScaleFactor
         pipeline.layer.frame = view.bounds
+        pipeline.updateDisplayTarget()
         pipeline.layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer?.addSublayer(pipeline.layer)
         contentView = view
