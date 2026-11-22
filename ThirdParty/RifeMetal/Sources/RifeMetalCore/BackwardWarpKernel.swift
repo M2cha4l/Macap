@@ -26,6 +26,17 @@ public enum RifeResourceBundle {
         }
         return nil
     }
+
+    /// Loads a prebuilt default.metallib if present; otherwise compiles Shaders/<shader>.metal at runtime
+    /// (lets the package build with Command Line Tools only, no Xcode Metal toolchain).
+    public static func library(device: MTLDevice, bundle: Bundle, shader: String) throws -> MTLLibrary {
+        if let lib = try? device.makeDefaultLibrary(bundle: bundle) { return lib }
+        guard let url = bundle.url(forResource: shader, withExtension: "metal", subdirectory: "Shaders")
+                ?? bundle.url(forResource: shader, withExtension: "metal") else {
+            throw BackwardWarpError.shaderNotFound
+        }
+        return try device.makeLibrary(source: String(contentsOf: url, encoding: .utf8), options: nil)
+    }
 }
 
 public enum BackwardWarpError: Error {
@@ -46,7 +57,7 @@ public final class BackwardWarpKernel {
         }
         let library: MTLLibrary
         do {
-            library = try device.makeDefaultLibrary(bundle: resBundle)
+            library = try RifeResourceBundle.library(device: device, bundle: resBundle, shader: "BackwardWarp")
         } catch {
             throw BackwardWarpError.pipelineCompilationFailed("library load failed: \(error)")
         }
@@ -147,7 +158,7 @@ public final class ConversionKernels {
         }
         let library: MTLLibrary
         do {
-            library = try device.makeDefaultLibrary(bundle: resBundle)
+            library = try RifeResourceBundle.library(device: device, bundle: resBundle, shader: "BackwardWarp")
         } catch {
             throw BackwardWarpError.pipelineCompilationFailed("library load failed: \(error)")
         }

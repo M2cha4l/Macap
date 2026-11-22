@@ -19,12 +19,7 @@ let package = Package(
         ),
         .target(
             name: "RifeMetalCore",
-            exclude: ["Shaders"],
-            plugins: [.plugin(name: "CompileMetalShaders")]
-        ),
-        .plugin(
-            name: "CompileMetalShaders",
-            capability: .buildTool()
+            resources: [.copy("Shaders")]
         ),
     ]
 )
