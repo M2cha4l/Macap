@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Install (or build + install) the root-owned UVC Bulk helper to /usr/local/libexec/captureinterp-uvc-helper
 # with a narrow sudoers NOPASSWD entry limited to that exact binary and its whitelisted flags.
-# Works both from a downloaded CaptureInterp.app (using the prebuilt helper in Contents/Resources/helper,
+# Works both from a downloaded Maccap.app (using the prebuilt helper in Contents/Resources/helper,
 # requiring NO Xcode / Command Line Tools) and from a source checkout (compiling tools/uvc_bulk_helper.c).
 #
 # Usage:
@@ -115,7 +115,7 @@ done
 /usr/bin/codesign --force --sign - --timestamp=none "$DEST_BIN" >/dev/null 2>&1 || true
 
 cat > "$TMP_SUDOERS" <<EOF
-# Allow CaptureInterp desktop user to invoke ONLY the root-owned UVC Bulk helper with fixed flags.
+# Allow Maccap desktop user to invoke ONLY the root-owned UVC Bulk helper with fixed flags.
 Defaults!$DEST_BIN env_reset, !setenv
 $TARGET_USER ALL=(root) NOPASSWD: $DEST_BIN "", $DEST_BIN --recover, $DEST_BIN --mode 4k60, $DEST_BIN --mode 4k30, $DEST_BIN --mode 2k60, $DEST_BIN --mode 1080p60
 EOF

@@ -1,4 +1,4 @@
-# CaptureInterp — 苹果电脑外接 PS5 实时补帧播放器（30 → 60 帧）
+# Maccap
 
 专为 **Apple Silicon 苹果电脑（Mac / Studio Display 外接 PS5）** 打造：通过免驱 HDMI 采集卡直接读取 PS5 的 30 帧大作画面，用苹果显卡实时补到 60 帧全屏低延迟显示，并自动同步 PS5 声音。不走网络串流，不抓屏。
 
@@ -23,8 +23,8 @@ Real-time low-latency frame interpolation (30 → 60 fps) designed for Apple Sil
 
 ## 下载安装版快速上手（`.dmg`）
 
-1. 打开 `CaptureInterp-v1.0.0-macOS-arm64.dmg`，将 **CaptureInterp.app** 拖入 **Applications（应用程序）**。
-2. 首次打开若系统提示未验证开发者：在「应用程序」里**按住 Control（或鼠标右键）点 CaptureInterp.app → 选「打开」**（或在「系统设置 → 隐私与安全性」底部点「仍要打开」）。
+1. 打开 `Maccap-v1.0.0-macOS-arm64.dmg`，将 **Maccap.app** 拖入 **Applications（应用程序）**。
+2. 首次打开若系统提示未验证开发者：在「应用程序」里**按住 Control（或鼠标右键）点 Maccap.app → 选「打开」**（或在「系统设置 → 隐私与安全性」底部点「仍要打开」）。
 3. 首次运行允许「摄像头」和「麦克风」权限。
 4. **不确定自己电脑带得动哪一档？** 打开软件后在画面任意位置**点鼠标右键**（或直接按 **`B` 键**），点菜单第一项 **「⚡ 一键测算本机接 PS5 推荐档位」**——程序会花约 3 秒实测你这台 Mac 跑 4K / 2K / 1080p 的真实毫秒数，直接弹窗给出最稳档位并支持一键应用。
 
@@ -61,7 +61,7 @@ Real-time low-latency frame interpolation (30 → 60 fps) designed for Apple Sil
 
 | 按键 / 操作 | 功能 |
 |---|---|
-| **图形控制面板 / `P`** | **打开软件即见居中图形设置面板；播放画面中按 `P` 键或点右上角「⚙ 控制面板」随时呼出** |
+| **卡片菜单 / `P`** | **没有画面时自动显示；播放中按 `P` 打开或收起。`←` `→` 选卡片，`↑` `↓` 选值，`Return` 确定，`Esc` 回到游戏。鼠标也能点卡片和选项** |
 | **`F` / `⌘F` / 双击画面** | **在「标准桌面窗口模式」与「无边框全屏游玩」之间切换（全屏下按 `Esc` 退回窗口）** |
 | **鼠标右键 / `M`** | 呼出快捷右键菜单 |
 | **`B`** | **一键实测本机 4K / 2K / 1080p 补帧算力并推荐最佳档位** |
@@ -81,7 +81,7 @@ Real-time low-latency frame interpolation (30 → 60 fps) designed for Apple Sil
 需要安装 Xcode 命令行工具与 Metal 工具链（`xcodebuild -downloadComponent MetalToolchain`）：
 
 ```sh
-./build.sh                  # 本地构建 CaptureInterp.app
+./build.sh                  # 本地构建 Maccap.app
 ./tools/package_dmg.sh      # 净室构建 + 独立自检 + 隐私阻断扫描 + 生成可分发 .dmg
 ```
 
