@@ -2596,6 +2596,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var fastSourceNoted = false
     private var warmup = 0
     var onStatus: ((String) -> Void)?          // short on-screen status line, called on the main queue
+    var onStats: ((String) -> Void)?           // once a second while frames flow: "60.0 fps · 68 ms · 丢帧 0", main queue
     var onStreamStateChange: ((Bool) -> Void)? // true when video stream is active, false when idle/disconnected
     private(set) var isStreaming = false
     private func notifyStreamActive(_ active: Bool) {
@@ -3270,7 +3271,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let m: UpscaleMode = upscaler.mode == .off ? .metalfx : .off
         upscaler.mode = m
         Log.shared.line("upscale: \(m.rawValue)")
-        DispatchQueue.main.async { self.onStatus?(m == .off ? "放大：关（显示层拉伸）　　按 X 切换" : "放大：MetalFX 空间放大　　按 X 切换") }
+        DispatchQueue.main.async { self.onStatus?(m == .off ? "放大：关　　按 X 切换" : "放大：MetalFX 开　　按 X 切换") }
     }
 
     func cycleSharpness() {
@@ -3889,9 +3890,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let span = CMTimeGetSeconds(CMTimeSubtract(now, lastReport))
         guard span >= 1 else { return }
         let srcIs60 = currentActiveSourceFps() >= 50
-        var status = ""
+        var stats: String
         if passing || fastSourceNoted {
-            status = String(format: "%@｜%@ 入 %.0f 帧｜程序处理 %.1f 毫秒", mode == .pass ? Mode.pass.title : "信号已 60 帧，自动直通", sourceSize, Double(frames) / span, percentile(procMs, 0.95))
+            stats = String(format: "%.1f fps · %.0f ms · 丢帧 0", Double(frames) / span, percentile(procMs, 0.95))
             Log.shared.line(String(format: "src %@ in %.1f fps | pass-through | device delivery p50 %.1f p95 %.1f ms | our processing p95 %.2f ms (arrival -> display layer; excludes vsync and compositor)",
                                    sourceSize, Double(frames) / span, percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(procMs, 0.95)))
         } else {
@@ -3900,7 +3901,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             let hold = percentile(holdMs, 0.5)
             seenLock.lock(); let seen = seenCount; seenCount = 0; seenLock.unlock()
             let src = srcIs60 ? String(format: "采集 %.0f 帧（其中新画面 %.0f）", Double(seen) / span, Double(frames) / span) : String(format: "采集 %.0f 帧", Double(frames) / span)
-            status = String(format: "%@｜%@ %@｜补帧后上屏 %.0f 帧｜等待 %.0f 毫秒｜晚到 %d 丢弃 %d", mode.title, sourceSize, src, Double(frames + mids) / span, hold, lateMids, droppedMids)
+            stats = String(format: "%.1f fps · %.0f ms · 丢帧 %d", Double(frames + mids) / span, hold, droppedMids)
             Log.shared.line(String(format: "src %@ in %.1f fps | out %.1f fps | mid %d late %d dropped %d fail %d | orig late %d | delivery p50 %.1f p95 %.1f ms | ready p95 %.1f ms | interp p95 %.1f ms | offset %.1f ms | hold to refresh p50 %.1f p95 %.1f ms (%@) | beyond delivery %.1f ms",
                                    sourceSize, Double(frames) / span, Double(frames + mids) / span, mids, lateMids, droppedMids, failed, lateOrig,
                                    percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(readyMs, 0.95), percentile(interpMs, 0.95),
@@ -3935,11 +3936,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             let snap = curAudio.takeSnapshot()
             Log.shared.line(String(format: "   audio: %d buffers, delayed %.0f ms, clock resyncs %d, renderer failures %d", snap.buffers, snap.delay, snap.resyncs, snap.failures) + " | " + snap.dbg)
         }
-        if !status.isEmpty {
-            let sc = collector.totalSaved
-            if sc > 0 { status += "｜样本 \(sc) 组" }
-            DispatchQueue.main.async { self.onStatus?(status) }
-        }
+        let sc = collector.totalSaved
+        if sc > 0 { stats += " · 样本 \(sc)" }
+        DispatchQueue.main.async { self.onStats?(stats) }
         holdMs.removeAll()
         frames = 0; mids = 0; lateMids = 0; lateOrig = 0; failed = 0; droppedMids = 0
         deliveryMs.removeAll(); readyMs.removeAll(); interpMs.removeAll(); procMs.removeAll()
@@ -3947,7 +3946,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
-// MARK: - Console UI (card-row menu)
+// MARK: - Console UI (card-row menu, toast, stats pill)
 
 /// One card of the menu. The view reads it on every render; the closures read and change the live pipeline.
 struct MenuItem {
@@ -4375,6 +4374,102 @@ final class CardMenuView: NSView {
     }
 }
 
+/// Top-right toast of Playing.dc.html: icon, bold first line, grey second line. Hides 2 s after the last show.
+final class ToastView: NSView {
+    private let iconLayer = CALayer()
+    private let titleLayer = Look.textLayer(wrapped: true)
+    private let detailLayer = Look.textLayer(wrapped: true)
+    private var hideWork: DispatchWorkItem?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layer = CALayer()
+        wantsLayer = true
+        isHidden = true
+        autoresizingMask = [.minXMargin, .minYMargin]
+        layer?.backgroundColor = Look.toast
+        layer?.shadowColor = Look.rgb(0x000000)
+        layer?.shadowOpacity = 0.5
+        iconLayer.contents = Look.icon
+        iconLayer.contentsGravity = .resizeAspect
+        for l in [iconLayer, titleLayer, detailLayer] { layer?.addSublayer(l) }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(title: String, detail: String) {
+        guard let host = superview, let root = layer else { return }
+        let s = Look.scale(host.bounds.height), px = window?.backingScaleFactor ?? 2
+        let w = 340 * s, textX = 16 * s + 40 * s + 14 * s, textW = w - textX - 16 * s
+        let t = Look.text(title, size: 15 * s, weight: .semibold, color: Look.white)
+        let d = Look.text(detail, size: 13 * s, weight: .regular, color: Look.dim)
+        let tsz = Look.measure(t, width: textW)
+        let dsz = detail.isEmpty ? .zero : Look.measure(d, width: textW)
+        let textH = tsz.height + (detail.isEmpty ? 0 : 3 * s + dsz.height)
+        let h = max(40 * s, textH) + 28 * s
+        let top = (h - textH) / 2
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = NSRect(x: host.bounds.width - 32 * s - w, y: host.bounds.height - 28 * s - h, width: w, height: h)
+        root.cornerRadius = 14 * s
+        root.shadowRadius = 18 * s
+        root.shadowOffset = CGSize(width: 0, height: -12 * s)
+        root.shadowPath = CGPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerWidth: 14 * s, cornerHeight: 14 * s, transform: nil)
+        iconLayer.frame = CGRect(x: 16 * s, y: (h - 40 * s) / 2, width: 40 * s, height: 40 * s)
+        titleLayer.string = t
+        titleLayer.contentsScale = px
+        titleLayer.frame = CGRect(x: textX, y: h - top - tsz.height, width: textW, height: tsz.height)
+        detailLayer.string = d
+        detailLayer.contentsScale = px
+        detailLayer.frame = CGRect(x: textX, y: h - top - textH, width: textW, height: dsz.height)
+        detailLayer.isHidden = detail.isEmpty
+        CATransaction.commit()
+        isHidden = false
+        hideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.isHidden = true }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+}
+
+/// Bottom-left stats pill of Playing.dc.html. `nil` hides it.
+final class StatsPillView: NSView {
+    private let textLayer = Look.textLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layer = CALayer()
+        wantsLayer = true
+        isHidden = true
+        autoresizingMask = [.maxXMargin, .maxYMargin]
+        layer?.backgroundColor = Look.pill
+        layer?.addSublayer(textLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func show(_ line: String?) {
+        guard let line, let host = superview else { isHidden = true; return }
+        let s = Look.scale(host.bounds.height)
+        let t = Look.text(line, size: 13 * s, weight: .regular, color: Look.white, digits: true)
+        let sz = Look.measure(t)
+        let h = sz.height + 12 * s, w = sz.width + 28 * s
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = NSRect(x: 28 * s, y: 24 * s, width: w, height: h)
+        layer?.cornerRadius = h / 2
+        textLayer.string = t
+        textLayer.contentsScale = window?.backingScaleFactor ?? 2
+        textLayer.frame = CGRect(x: 14 * s, y: 6 * s, width: sz.width + 1, height: sz.height)
+        CATransaction.commit()
+        isHidden = false
+    }
+}
+
 // MARK: - App
 
 /// A borderless window does not take key presses unless it says it can.
@@ -4406,9 +4501,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var activeScreen: NSScreen?
     let pipeline = Pipeline()
     var displayLink: CADisplayLink?
-    let hud = NSTextField(labelWithString: "")
+    let toast = ToastView(frame: .zero)
+    let statsPill = StatsPillView(frame: .zero)
+    private var liveStats: String?
     var hudPinned = Prefs.loadHudPinned()
-    var hudHide: DispatchWorkItem?
     var installingHelper = false
     var runningBenchmark = false
     var isBorderlessFullscreen = false
@@ -4429,20 +4525,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ProcessInfo.processInfo.environment["CI_HEADLESS"] != "1"
     }
 
-    /// Show a line of status. Pinned (key H) it stays; otherwise it fades after a few seconds.
+    /// Toast for a status line ("title　　detail"). Forced lines always show; the rest only while the stats pill is pinned.
     func showStatus(_ text: String, force: Bool = false) {
         cardMenu.reload()
         guard hudPinned || force else { return }
-        hud.stringValue = "  " + text + "    [P 控制面板  F 全屏  B 测档位  1-6 切档  K 锐化  H 状态  Q 退出]  "
-        hud.sizeToFit()
-        hud.isHidden = false
-        hudHide?.cancel()
-        let keepPinnedForAlert = text.contains("重新插拔") || text.contains("未检测") || text.contains("等待")
-        if !hudPinned && !keepPinnedForAlert {
-            let w = DispatchWorkItem { [weak self] in self?.hud.isHidden = true }
-            hudHide = w
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: w)
-        }
+        let parts = text.components(separatedBy: "　　")
+        toast.show(title: parts[0], detail: parts.dropFirst().joined(separator: " "))
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -4682,9 +4770,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func updateMenuVisibility() {
         let streaming = pipeline.isStreaming
         cardMenu.hint = streaming ? "← → 选卡片　↑ ↓ 选值　Return 确定　Esc 回到游戏" : "← → 选卡片　↑ ↓ 选值　Return 确定　插上采集卡后自动出画面"
-        cardMenu.stats = streaming ? "已连接 · \(pipeline.currentActiveDeviceName) \(pipeline.currentSourceSize)" : "未检测到采集卡"
+        cardMenu.stats = streaming ? (liveStats ?? "已连接 · \(pipeline.currentSourceSize)") : "未检测到采集卡"
         cardMenu.setOpen(!streaming || menuOverVideo)
         cardMenu.reload()
+        updateStatsPill()
+    }
+
+    private func updateStatsPill() {
+        statsPill.show(hudPinned && pipeline.isStreaming && !cardMenu.isOpen ? liveStats : nil)
     }
 
     @objc private func toggleMenu(_ sender: Any?) {
@@ -4709,7 +4802,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func setHudPinned(_ on: Bool) {
         hudPinned = on
         Prefs.saveHudPinned(on)
-        if on { showStatus("状态常显：" + pipeline.mode.title, force: true) } else { hud.isHidden = true }
+        if on { showStatus("状态条：常显", force: true) }
+        updateStatsPill()
         cardMenu.reload()
     }
 
@@ -5229,17 +5323,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         contentView = view
         window.contentView = view
 
-        hud.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        hud.textColor = .white
-        hud.drawsBackground = true
-        hud.backgroundColor = NSColor.black.withAlphaComponent(0.62)
-        hud.isHidden = true
-        hud.setFrameOrigin(NSPoint(x: 16, y: 16))
         cardMenu.frame = view.bounds
         cardMenu.autoresizingMask = [.width, .height]
         cardMenu.items = makeMenuItems()
         view.addSubview(cardMenu)
-        view.addSubview(hud)
+        view.addSubview(statsPill)
+        view.addSubview(toast)
 
         if opts.fullscreen {
             setBorderlessFullscreen(true)
@@ -5252,8 +5341,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         pipeline.onStreamStateChange = { [weak self] active in
             guard let self else { return }
             if active && !self.streamActive { self.menuOverVideo = false }
+            if !active { self.liveStats = nil }
             self.streamActive = active
             self.updateMenuVisibility()
+        }
+        pipeline.onStats = { [weak self] line in
+            guard let self else { return }
+            self.liveStats = line
+            if self.pipeline.isStreaming { self.cardMenu.stats = line }
+            self.updateStatsPill()
         }
         pipeline.onStatus = { [weak self] text in
             guard let self else { return }
