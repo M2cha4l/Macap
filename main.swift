@@ -3226,6 +3226,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     private let modeLock = NSLock()
     private var pendingMode: Mode?
+    /// The mode the user asked for; `mode` catches up at the next frame.
+    var requestedMode: Mode { modeLock.lock(); defer { modeLock.unlock() }; return pendingMode ?? mode }
     private let sharpLock = NSLock()
     private var casStrength = Float(opts.sharpness)
 
@@ -3945,6 +3947,434 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
+// MARK: - Console UI (card-row menu)
+
+/// One card of the menu. The view reads it on every render; the closures read and change the live pipeline.
+struct MenuItem {
+    let title: String
+    let symbol: String                 // SF Symbol name
+    let options: () -> [String]
+    let current: () -> Int             // -1: an action item, no option is "the current one"
+    let apply: (Int) -> Void
+    let note: (Int) -> String
+}
+
+/// Colors and sizes of the prototypes (Shelf.dc.html, Playing.dc.html), which are drawn on a 1280x720 artboard.
+enum Look {
+    static func rgb(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
+        CGColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: a)
+    }
+    static let white = CGColor(gray: 1, alpha: 1)
+    static let clear = CGColor(gray: 0, alpha: 0)
+    static let base = rgb(0x05070d)
+    static let dim = rgb(0xa7b0c0)
+    static let noteText = rgb(0xc4cbd8)
+    static let hintText = rgb(0x6b7487)
+    static let cardFocused = rgb(0x24304a)
+    static let card = rgb(0x1a2133, 0.92)
+    static let toast = rgb(0x141a28)
+    static let pill = rgb(0x0b0f19, 0.92)
+    static let transition: CFTimeInterval = 0.12
+
+    /// Artboard pixels to points for a view of this height: 1.5 on a 1080-point 4K TV.
+    static func scale(_ height: CGFloat) -> CGFloat { min(2, max(0.75, height / 720)) }
+
+    static func text(_ s: String, size: CGFloat, weight: NSFont.Weight, color: CGColor, lineHeight: CGFloat? = nil, digits: Bool = false) -> NSAttributedString {
+        let font = digits ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight)
+        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(cgColor: color) ?? NSColor.white,
+                                                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): color]
+        if let lineHeight {
+            let p = NSMutableParagraphStyle()
+            p.minimumLineHeight = lineHeight
+            p.maximumLineHeight = lineHeight
+            attrs[.paragraphStyle] = p
+        }
+        return NSAttributedString(string: s, attributes: attrs)
+    }
+
+    static func measure(_ a: NSAttributedString, width: CGFloat = .greatestFiniteMagnitude) -> CGSize {
+        let r = a.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading])
+        return CGSize(width: ceil(r.width), height: ceil(r.height))
+    }
+
+    /// CATextLayer's own truncation draws a cut-off line half a line too low (seen with CJK text), so single lines are cut here.
+    static func fitted(_ a: NSAttributedString, width: CGFloat) -> NSAttributedString {
+        guard measure(a).width > width, a.length > 0 else { return a }
+        let attrs = a.attributes(at: 0, effectiveRange: nil)
+        var chars = Array(a.string)
+        while !chars.isEmpty {
+            chars.removeLast()
+            let t = NSAttributedString(string: String(chars) + "…", attributes: attrs)
+            if measure(t).width <= width { return t }
+        }
+        return NSAttributedString(string: "", attributes: attrs)
+    }
+
+    static func textLayer(wrapped: Bool = false, align: CATextLayerAlignmentMode = .left) -> CATextLayer {
+        let t = CATextLayer()
+        t.isWrapped = wrapped
+        t.truncationMode = .none
+        t.alignmentMode = align
+        return t
+    }
+
+    /// The bundle's AppIcon.icns; drawn here when the app runs outside its bundle.
+    static let icon: CGImage = {
+        var rect = CGRect(x: 0, y: 0, width: 256, height: 256)
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let img = NSImage(contentsOf: url)?.cgImage(forProposedRect: &rect, context: nil, hints: nil) { return img }
+        let ctx = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        drawMaccapIcon(ctx, size: 256)
+        return ctx.makeImage()!
+    }()
+
+    /// Same drawing as tools/make_icon.swift: the prototype SVG (viewBox 256, y down).
+    static func drawMaccapIcon(_ ctx: CGContext, size: CGFloat) {
+        let k = size / 256
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: size)
+        ctx.scaleBy(x: k, y: -k)
+        ctx.setFillColor(rgb(0xefebe2))
+        ctx.addPath(CGPath(roundedRect: CGRect(x: 24, y: 24, width: 208, height: 208), cornerWidth: 48, cornerHeight: 48, transform: nil))
+        ctx.fillPath()
+        ctx.setStrokeColor(rgb(0x1b1a17))
+        ctx.setLineWidth(6)
+        ctx.stroke(CGRect(x: 52, y: 62, width: 100, height: 74))
+        ctx.stroke(CGRect(x: 104, y: 120, width: 100, height: 74))
+        ctx.setFillColor(rgb(0xbf3320))
+        ctx.fill(CGRect(x: 78, y: 91, width: 100, height: 74))
+        ctx.restoreGState()
+    }
+
+    private static var symbols: [String: CGImage] = [:]
+
+    /// A white SF Symbol fitted into a square of `box` points.
+    static func symbol(_ name: String, box: CGFloat, scale: CGFloat) -> CGImage? {
+        let key = "\(name)@\(box)x\(scale)"
+        if let hit = symbols[key] { return hit }
+        guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: box, weight: .regular)) else { return nil }
+        let px = Int((box * scale).rounded(.up))
+        guard let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        let k = min(box / img.size.width, box / img.size.height)
+        let w = img.size.width * k, h = img.size.height * k
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        img.draw(in: CGRect(x: (box - w) / 2, y: (box - h) / 2, width: w, height: h))
+        NSGraphicsContext.restoreGraphicsState()
+        ctx.setBlendMode(.sourceIn)
+        ctx.setFillColor(white)
+        ctx.fill(CGRect(x: 0, y: 0, width: box, height: box))
+        let out = ctx.makeImage()
+        symbols[key] = out
+        return out
+    }
+}
+
+/// Full-window console menu: top bar, a row of cards (one per MenuItem), and the focused card's options.
+/// Static layers only. It animates (Look.transition) on open, close and focus change, and draws nothing while closed.
+final class CardMenuView: NSView {
+    var items: [MenuItem] = []
+    var stats = "" { didSet { if isOpen && stats != oldValue { still { self.layoutTopBar() } } } }
+    var hint = "" { didSet { if isOpen && hint != oldValue { still { self.layoutHint() } } } }
+    private(set) var isOpen = false
+    private var focus = 0
+    private var option = 0
+    private var rowShift: CGFloat = 0
+
+    private final class Card {
+        let ring = CALayer()
+        let body = CALayer()
+        let icon = CALayer()
+        let value = Look.textLayer(align: .center)
+    }
+
+    private let scrim = CAGradientLayer()
+    private let iconLayer = CALayer()
+    private let nameLayer = Look.textLayer()
+    private let statsLayer = Look.textLayer(align: .right)
+    private var cards: [Card] = []
+    private var cardRects: [CGRect] = []
+    private let titleLayer = Look.textLayer()
+    private var pillLayers: [CALayer] = []
+    private var pillRects: [CGRect] = []
+    private let noteLayer = Look.textLayer(wrapped: true)
+    private let hintLayer = Look.textLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layer = CALayer()
+        wantsLayer = true
+        isHidden = true
+        scrim.startPoint = CGPoint(x: 0, y: 0.5)
+        scrim.endPoint = CGPoint(x: 1, y: 0.5)
+        scrim.colors = [Look.rgb(0x05070d, 0.96), Look.rgb(0x05070d, 0.82), Look.rgb(0x05070d, 0.35)]
+        scrim.locations = [0, 0.5, 1]
+        iconLayer.contents = Look.icon
+        iconLayer.contentsGravity = .resizeAspect
+        for l in [scrim, iconLayer, nameLayer, statsLayer, titleLayer, noteLayer, hintLayer] { layer?.addSublayer(l) }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private var s: CGFloat { Look.scale(bounds.height) }
+    private var px: CGFloat { window?.backingScaleFactor ?? 2 }
+
+    /// Bounds-relative rect in artboard orientation (y down) to layer geometry (y up).
+    private func up(_ r: CGRect) -> CGRect { CGRect(x: r.minX, y: bounds.height - r.maxY, width: r.width, height: r.height) }
+
+    private func still(_ body: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        body()
+        CATransaction.commit()
+    }
+
+    private func currentOrFirst(_ i: Int) -> Int { max(0, items[i].current()) }
+
+    // MARK: Commands
+
+    func setOpen(_ open: Bool) {
+        guard open != isOpen, let root = layer else { return }
+        isOpen = open
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Look.transition)
+        if open {
+            if !items.isEmpty { focus = min(focus, items.count - 1); option = currentOrFirst(focus) }
+            still { root.opacity = 0; self.render() }
+            isHidden = false
+            root.opacity = 1
+        } else {
+            CATransaction.setCompletionBlock { [weak self] in
+                guard let self, !self.isOpen else { return }
+                self.isHidden = true
+            }
+            root.opacity = 0
+        }
+        CATransaction.commit()
+    }
+
+    /// Re-read every item from the model (after a setting changed somewhere).
+    func reload() {
+        guard isOpen else { return }
+        still { render() }
+    }
+
+    func moveFocus(_ d: Int) {
+        guard isOpen, !items.isEmpty else { return }
+        let f = min(items.count - 1, max(0, focus + d))
+        guard f != focus else { return }
+        focus = f
+        option = currentOrFirst(f)
+        animated { render() }
+    }
+
+    func moveOption(_ d: Int) {
+        guard isOpen, !items.isEmpty else { return }
+        let n = items[focus].options().count
+        let o = min(n - 1, max(0, option + d))
+        guard o != option else { return }
+        option = o
+        animated { render() }
+    }
+
+    func activate() {
+        guard isOpen, !items.isEmpty, option < items[focus].options().count else { return }
+        items[focus].apply(option)
+        reload()
+    }
+
+    private func animated(_ body: () -> Void) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(Look.transition)
+        body()
+        CATransaction.commit()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let top = CGPoint(x: p.x, y: bounds.height - p.y)
+        if let i = cardRects.firstIndex(where: { $0.contains(top) }) {
+            if i != focus { focus = i; option = currentOrFirst(i); animated { render() } }
+        } else if let j = pillRects.firstIndex(where: { $0.contains(top) }) {
+            option = j
+            activate()
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        reload()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        reload()
+    }
+
+    // MARK: Layout (artboard units times s, y down, converted by up())
+
+    private func render() {
+        guard !items.isEmpty else { return }
+        option = min(option, max(0, items[focus].options().count - 1))
+        scrim.frame = bounds
+        layoutTopBar()
+        layoutCards()
+        layoutDetails()
+        layoutHint()
+    }
+
+    private func layoutTopBar() {
+        let s = s, px = px
+        iconLayer.frame = up(CGRect(x: 64 * s, y: 40 * s, width: 40 * s, height: 40 * s))
+        let name = Look.text("Maccap", size: 20 * s, weight: .light, color: Look.white)
+        let nsz = Look.measure(name)
+        nameLayer.string = name
+        nameLayer.contentsScale = px
+        nameLayer.frame = up(CGRect(x: 118 * s, y: 60 * s - nsz.height / 2, width: nsz.width + 2, height: nsz.height))
+        let st = Look.fitted(Look.text(stats, size: 14 * s, weight: .regular, color: Look.dim, digits: true), width: bounds.width / 2)
+        let ssz = Look.measure(st)
+        statsLayer.string = st
+        statsLayer.contentsScale = px
+        let w = min(ssz.width + 2, bounds.width / 2)
+        statsLayer.frame = up(CGRect(x: bounds.width - 64 * s - w, y: 60 * s - ssz.height / 2, width: w, height: ssz.height))
+    }
+
+    private func layoutCards() {
+        let s = s, px = px
+        while cards.count < items.count {
+            let c = Card()
+            c.body.addSublayer(c.icon)
+            c.body.addSublayer(c.value)
+            layer?.addSublayer(c.ring)
+            layer?.addSublayer(c.body)
+            cards.append(c)
+        }
+        while cards.count > items.count {
+            let c = cards.removeLast()
+            c.ring.removeFromSuperlayer()
+            c.body.removeFromSuperlayer()
+        }
+        let pad = 64 * s, gap = 22 * s, rowTop = 116 * s, rowH = 160 * s
+        let sizes = items.indices.map { $0 == focus ? 150 * s : 118 * s }
+        var starts: [CGFloat] = []
+        var x: CGFloat = 0
+        for w in sizes { starts.append(x); x += w + gap }
+        let total = x - gap, avail = bounds.width - 2 * pad
+        let f0 = starts[focus], f1 = f0 + sizes[focus]
+        if f0 < rowShift { rowShift = f0 }
+        if f1 - rowShift > avail { rowShift = f1 - avail }
+        rowShift = max(0, min(rowShift, total - avail))
+
+        cardRects = []
+        for (i, c) in cards.enumerated() {
+            let on = i == focus, w = sizes[i]
+            let r = CGRect(x: pad + starts[i] - rowShift, y: rowTop + (rowH - w) / 2, width: w, height: w)
+            cardRects.append(r)
+            let item = items[i], opts = item.options(), cur = item.current()
+            c.ring.frame = up(r.insetBy(dx: -6 * s, dy: -6 * s))
+            c.ring.cornerRadius = 22 * s
+            c.ring.backgroundColor = Look.rgb(0xffffff, 0.18)
+            c.ring.opacity = on ? 1 : 0
+            c.body.frame = up(r)
+            c.body.cornerRadius = 16 * s
+            c.body.borderWidth = 3 * s
+            c.body.borderColor = on ? Look.white : Look.clear
+            c.body.backgroundColor = on ? Look.cardFocused : Look.card
+            c.body.shadowColor = Look.rgb(0x000000)
+            c.body.shadowOpacity = on ? 0.6 : 0
+            c.body.shadowRadius = 20 * s
+            c.body.shadowOffset = CGSize(width: 0, height: -16 * s)
+            c.body.shadowPath = CGPath(roundedRect: CGRect(origin: .zero, size: r.size), cornerWidth: 16 * s, cornerHeight: 16 * s, transform: nil)
+
+            let label = Look.fitted(Look.text(opts.indices.contains(cur) ? opts[cur] : item.title, size: 12 * s, weight: .regular, color: on ? Look.white : Look.dim), width: w - 16 * s)
+            let lh = Look.measure(label).height
+            let icon = 34 * s, glyph = 28 * s, contentTop = (w - icon - 10 * s - lh) / 2
+            c.icon.contents = Look.symbol(item.symbol, box: glyph, scale: px)
+            c.icon.contentsScale = px
+            c.icon.frame = CGRect(x: (w - glyph) / 2, y: w - contentTop - icon + (icon - glyph) / 2, width: glyph, height: glyph)
+            c.value.string = label
+            c.value.contentsScale = px
+            c.value.frame = CGRect(x: 8 * s, y: w - contentTop - icon - 10 * s - lh, width: w - 16 * s, height: lh)
+        }
+    }
+
+    private func layoutDetails() {
+        let s = s, px = px
+        let item = items[focus], opts = item.options(), cur = item.current()
+        let left = 64 * s, maxW = min(620 * s, bounds.width - 2 * left)
+        var y = 312 * s
+
+        let title = Look.text(item.title, size: 52 * s, weight: .light, color: Look.white, lineHeight: 57.2 * s)
+        let tsz = Look.measure(title, width: maxW)
+        titleLayer.string = title
+        titleLayer.contentsScale = px
+        titleLayer.frame = up(CGRect(x: left, y: y, width: maxW, height: tsz.height))
+        y += tsz.height + 18 * s
+
+        still {
+            pillLayers.forEach { $0.removeFromSuperlayer() }
+            pillLayers = []
+            pillRects = []
+            var x = left
+            let h = 48 * s
+            for (j, o) in opts.enumerated() {
+                let selected = j == cur
+                let label = Look.text(o, size: 16 * s, weight: .semibold, color: selected ? Look.base : Look.white)
+                let lsz = Look.measure(label)
+                let w = lsz.width + 52 * s
+                if x > left && x + w > left + maxW { x = left; y += h + 10 * s }
+                let r = CGRect(x: x, y: y, width: w, height: h)
+                pillRects.append(r)
+                if j == option {
+                    let ring = CALayer()
+                    ring.frame = up(r.insetBy(dx: -5 * s, dy: -5 * s))
+                    ring.cornerRadius = h / 2 + 5 * s
+                    ring.borderWidth = 2 * s
+                    ring.borderColor = Look.white
+                    pillLayers.append(ring)
+                }
+                let p = CALayer()
+                p.frame = up(r)
+                p.cornerRadius = h / 2
+                p.borderWidth = 2 * s
+                p.borderColor = selected || j == option ? Look.white : Look.rgb(0xffffff, 0.35)
+                p.backgroundColor = selected ? Look.white : Look.clear
+                let t = Look.textLayer(align: .center)
+                t.string = label
+                t.contentsScale = px
+                t.frame = CGRect(x: 0, y: (h - lsz.height) / 2, width: w, height: lsz.height)
+                p.addSublayer(t)
+                pillLayers.append(p)
+                x += w + 10 * s
+            }
+            pillLayers.forEach { layer?.addSublayer($0) }
+        }
+        y += 48 * s + 18 * s
+
+        let note = Look.text(opts.isEmpty ? "" : item.note(option), size: 18 * s, weight: .light, color: Look.noteText, lineHeight: 28.8 * s)
+        let nsz = Look.measure(note, width: maxW)
+        noteLayer.string = note
+        noteLayer.contentsScale = px
+        noteLayer.frame = up(CGRect(x: left, y: y, width: maxW, height: nsz.height))
+    }
+
+    private func layoutHint() {
+        let s = s
+        let h = Look.fitted(Look.text(hint, size: 12 * s, weight: .regular, color: Look.hintText), width: bounds.width - 128 * s)
+        let sz = Look.measure(h)
+        hintLayer.string = h
+        hintLayer.contentsScale = px
+        hintLayer.frame = up(CGRect(x: 64 * s, y: bounds.height - 40 * s - sz.height, width: min(sz.width + 2, bounds.width - 128 * s), height: sz.height))
+    }
+}
+
 // MARK: - App
 
 /// A borderless window does not take key presses unless it says it can.
@@ -3956,21 +4386,6 @@ final class KeyWindow: NSWindow {
 final class ContentView: NSView {
     var buildContextMenu: (() -> NSMenu)?
     var onDoubleClickBackground: (() -> Void)?
-    var onMouseActivity: (() -> Void)?
-    private var tracking: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        onMouseActivity?()
-    }
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
@@ -3994,31 +4409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     let hud = NSTextField(labelWithString: "")
     var hudPinned = Prefs.loadHudPinned()
     var hudHide: DispatchWorkItem?
-    var quickBarHide: DispatchWorkItem?
     var installingHelper = false
     var runningBenchmark = false
     var isBorderlessFullscreen = false
     var savedWindowedFrame: NSRect?
-    var panelManuallyShownOverVideo = false
-
-    // Visual Desktop Control Card & Floating Quick Bar
-    var controlCard: NSVisualEffectView!
-    var quickBar: NSVisualEffectView!
-    var statusBadgeLabel: NSTextField!
-    var closeCardButton: NSButton!
-    var devicePopup: NSPopUpButton!
-    var screenPopup: NSPopUpButton!
-    var resSegment: NSSegmentedControl!
-    var modeSegment: NSSegmentedControl!
-    var sharpSegment: NSSegmentedControl!
-    var audioCheckbox: NSButton!
-    var gainPopup: NSPopUpButton!
-    var benchActionButton: NSButton!
-    var rawUSBActionButton: NSButton!
-    var fullscreenActionButton: NSButton!
-    var quickFullscreenButton: NSButton!
-    private var cachedMenuDevices: [String] = []
-    private var cachedMenuScreens: [NSScreen] = []
+    let cardMenu = CardMenuView(frame: .zero)
+    private var menuOverVideo = false   // P opened the menu over a playing stream
+    private var streamActive = false
 
     private let windowedStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
     private let fullscreenWindowLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
@@ -4034,7 +4431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// Show a line of status. Pinned (key H) it stays; otherwise it fades after a few seconds.
     func showStatus(_ text: String, force: Bool = false) {
-        syncControlPanelUI()
+        cardMenu.reload()
         guard hudPinned || force else { return }
         hud.stringValue = "  " + text + "    [P 控制面板  F 全屏  B 测档位  1-6 切档  K 锐化  H 状态  Q 退出]  "
         hud.sizeToFit()
@@ -4150,8 +4547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         pipeline.layer.frame = contentView.bounds
         pipeline.updateDisplayTarget()
         window.makeKeyAndOrderFront(nil)
-        syncControlPanelUI()
-        updateOverlayVisibility()
+        updateMenuVisibility()
     }
 
     func windowDidResize(_ notification: Notification) {
@@ -4181,435 +4577,148 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         showStatus("输出显示器：\(screen.localizedName)", force: true)
     }
 
-    // MARK: - Visual Desktop Control Panel Card
+    // MARK: - Card-row menu
 
-    private func buildVisualOverlayUI(in parent: NSView) {
-        // 1. Top-right floating quick bar (visible on mouse activity when the big card is collapsed)
-        let qb = NSVisualEffectView()
-        qb.translatesAutoresizingMaskIntoConstraints = false
-        qb.material = .hudWindow
-        qb.blendingMode = .withinWindow
-        qb.state = .active
-        qb.wantsLayer = true
-        qb.layer?.cornerRadius = 10
-        qb.layer?.borderWidth = 1
-        qb.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
-
-        let openPanelBtn = NSButton(title: "⚙ 控制面板 (P)", target: self, action: #selector(uiToggleControlCard(_:)))
-        openPanelBtn.bezelStyle = .recessed
-        openPanelBtn.controlSize = .regular
-
-        let qFullBtn = NSButton(title: "⛶ 全屏 (F)", target: self, action: #selector(uiToggleFullscreen(_:)))
-        qFullBtn.bezelStyle = .recessed
-        qFullBtn.controlSize = .regular
-        quickFullscreenButton = qFullBtn
-
-        let qbStack = NSStackView(views: [openPanelBtn, qFullBtn])
-        qbStack.translatesAutoresizingMaskIntoConstraints = false
-        qbStack.orientation = .horizontal
-        qbStack.spacing = 8
-        qbStack.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
-        qb.addSubview(qbStack)
-        NSLayoutConstraint.activate([
-            qbStack.leadingAnchor.constraint(equalTo: qb.leadingAnchor),
-            qbStack.trailingAnchor.constraint(equalTo: qb.trailingAnchor),
-            qbStack.topAnchor.constraint(equalTo: qb.topAnchor),
-            qbStack.bottomAnchor.constraint(equalTo: qb.bottomAnchor),
-        ])
-        parent.addSubview(qb)
-        NSLayoutConstraint.activate([
-            qb.topAnchor.constraint(equalTo: parent.topAnchor, constant: 34),
-            qb.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -18),
-        ])
-        quickBar = qb
-
-        // 2. Centered Dark Glass Control Card
-        let card = NSVisualEffectView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.material = .hudWindow
-        card.blendingMode = .withinWindow
-        card.state = .active
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 18
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
-
-        let vStack = NSStackView()
-        vStack.translatesAutoresizingMaskIntoConstraints = false
-        vStack.orientation = .vertical
-        vStack.alignment = .leading
-        vStack.spacing = 14
-        vStack.edgeInsets = NSEdgeInsets(top: 22, left: 26, bottom: 22, right: 26)
-
-        // Header
-        let titleLbl = NSTextField(labelWithString: "CaptureInterp")
-        titleLbl.font = .systemFont(ofSize: 22, weight: .bold)
-        titleLbl.textColor = .white
-
-        let subLbl = NSTextField(labelWithString: "苹果电脑外接 PS5 实时补帧播放器（30 → 60 帧）")
-        subLbl.font = .systemFont(ofSize: 13, weight: .medium)
-        subLbl.textColor = NSColor.white.withAlphaComponent(0.72)
-
-        let titleCol = NSStackView(views: [titleLbl, subLbl])
-        titleCol.orientation = .vertical
-        titleCol.alignment = .leading
-        titleCol.spacing = 2
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let closeBtn = NSButton(title: "✕ 收起看画面 (P)", target: self, action: #selector(uiHideControlCard(_:)))
-        closeBtn.bezelStyle = .rounded
-        closeBtn.controlSize = .small
-        closeCardButton = closeBtn
-
-        let headerRow = NSStackView(views: [titleCol, spacer, closeBtn])
-        headerRow.orientation = .horizontal
-        headerRow.alignment = .centerY
-        vStack.addArrangedSubview(headerRow)
-        headerRow.widthAnchor.constraint(equalTo: vStack.widthAnchor, constant: -52).isActive = true
-
-        // Status Pill
-        let statusBox = NSView()
-        statusBox.translatesAutoresizingMaskIntoConstraints = false
-        statusBox.wantsLayer = true
-        statusBox.layer?.cornerRadius = 9
-        statusBox.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-
-        let sLbl = NSTextField(labelWithString: "")
-        sLbl.translatesAutoresizingMaskIntoConstraints = false
-        sLbl.font = .systemFont(ofSize: 13, weight: .medium)
-        sLbl.textColor = .white
-        sLbl.lineBreakMode = .byTruncatingTail
-        statusBadgeLabel = sLbl
-        statusBox.addSubview(sLbl)
-        NSLayoutConstraint.activate([
-            sLbl.leadingAnchor.constraint(equalTo: statusBox.leadingAnchor, constant: 12),
-            sLbl.trailingAnchor.constraint(equalTo: statusBox.trailingAnchor, constant: -12),
-            sLbl.topAnchor.constraint(equalTo: statusBox.topAnchor, constant: 8),
-            sLbl.bottomAnchor.constraint(equalTo: statusBox.bottomAnchor, constant: -8),
-        ])
-        vStack.addArrangedSubview(statusBox)
-        statusBox.widthAnchor.constraint(equalTo: vStack.widthAnchor, constant: -52).isActive = true
-
-        func makeFormRow(_ labelText: String, controls: [NSView]) -> NSStackView {
-            let lbl = NSTextField(labelWithString: labelText)
-            lbl.font = .systemFont(ofSize: 13, weight: .medium)
-            lbl.textColor = NSColor.white.withAlphaComponent(0.82)
-            lbl.alignment = .right
-            lbl.translatesAutoresizingMaskIntoConstraints = false
-            lbl.widthAnchor.constraint(equalToConstant: 92).isActive = true
-
-            let row = NSStackView(views: [lbl] + controls)
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 10
-            return row
-        }
-
-        // Row: Input Device
-        let devPop = NSPopUpButton(frame: .zero, pullsDown: false)
-        devPop.target = self
-        devPop.action = #selector(uiDevicePopupChanged(_:))
-        devPop.widthAnchor.constraint(greaterThanOrEqualToConstant: 330).isActive = true
-        devicePopup = devPop
-
-        let refreshBtn = NSButton(title: "刷新设备", target: self, action: #selector(uiRefreshDevices(_:)))
-        refreshBtn.bezelStyle = .rounded
-        refreshBtn.controlSize = .regular
-        vStack.addArrangedSubview(makeFormRow("采集输入源", controls: [devPop, refreshBtn]))
-
-        // Row: Output Screen
-        let scrPop = NSPopUpButton(frame: .zero, pullsDown: false)
-        scrPop.target = self
-        scrPop.action = #selector(uiScreenPopupChanged(_:))
-        scrPop.widthAnchor.constraint(greaterThanOrEqualToConstant: 330).isActive = true
-        screenPopup = scrPop
-        vStack.addArrangedSubview(makeFormRow("输出显示器", controls: [scrPop]))
-
-        // Row: Max Resolution
-        let resSeg = NSSegmentedControl(labels: ["4K 原生 (3840×2160)", "限制 2K (2560×1440)", "限制 1080p"], trackingMode: .selectOne, target: self, action: #selector(uiResSegmentChanged(_:)))
-        resSegment = resSeg
-        vStack.addArrangedSubview(makeFormRow("采集分辨率", controls: [resSeg]))
-
-        // Row: Interpolation Mode
-        let modeSeg = NSSegmentedControl(labels: ["[1] 直通(60帧)", "[4] 延迟低", "[6] 均衡4.5档(推荐)", "[5] 画质好"], trackingMode: .selectOne, target: self, action: #selector(uiModeSegmentChanged(_:)))
-        modeSegment = modeSeg
-        vStack.addArrangedSubview(makeFormRow("PS5 补帧档位", controls: [modeSeg]))
-
-        // Row: Sharpness
-        let sharpSeg = NSSegmentedControl(labels: ["关 (0.0)", "标准 (0.55)", "强 (0.90)"], trackingMode: .selectOne, target: self, action: #selector(uiSharpSegmentChanged(_:)))
-        sharpSegment = sharpSeg
-        vStack.addArrangedSubview(makeFormRow("5K 自适应锐化", controls: [sharpSeg]))
-
-        // Row: Audio + Gain
-        let audChk = NSButton(checkboxWithTitle: "同步播放 PS5 声音", target: self, action: #selector(uiAudioCheckboxChanged(_:)))
-        audioCheckbox = audChk
-        let gPop = NSPopUpButton(frame: .zero, pullsDown: false)
-        gPop.addItems(withTitles: ["音量 +0 dB（原始）", "音量 +12 dB（适中）", "音量 +20 dB（默认推荐）", "音量 +26 dB（强）"])
-        gPop.target = self
-        gPop.action = #selector(uiGainPopupChanged(_:))
-        gainPopup = gPop
-        vStack.addArrangedSubview(makeFormRow("声音与增益", controls: [audChk, gPop]))
-
-        // Divider
-        let div = NSBox()
-        div.boxType = .separator
-        vStack.addArrangedSubview(div)
-        div.widthAnchor.constraint(equalTo: vStack.widthAnchor, constant: -52).isActive = true
-
-        // Primary Action Buttons
-        let bBtn = NSButton(title: "⚡ 一键实测本机能带几档 (B)", target: self, action: #selector(menuRunBenchmark(_:)))
-        bBtn.bezelStyle = .rounded
-        bBtn.controlSize = .large
-        bBtn.bezelColor = .controlAccentColor
-        benchActionButton = bBtn
-
-        let uBtn = NSButton(title: "10G 采集卡直读", target: self, action: #selector(uiRawUSBButtonClicked(_:)))
-        uBtn.bezelStyle = .rounded
-        uBtn.controlSize = .large
-        rawUSBActionButton = uBtn
-
-        let fBtn = NSButton(title: "⛶ 进入全屏游玩 (F)", target: self, action: #selector(uiToggleFullscreen(_:)))
-        fBtn.bezelStyle = .rounded
-        fBtn.controlSize = .large
-        fullscreenActionButton = fBtn
-
-        let actionRow = NSStackView(views: [bBtn, uBtn, fBtn])
-        actionRow.orientation = .horizontal
-        actionRow.spacing = 10
-        vStack.addArrangedSubview(actionRow)
-
-        // Footer PS5 Checklist
-        let tipLbl = NSTextField(wrappingLabelWithString: "PS5 主机端必设： ① 关闭 HDCP（否则采集黑屏）  ② 关闭 HDR / VRR / 120Hz  ③ 声音输出设「2声道线性PCM」\n提示：双击空白画面或按 F 切换全屏/窗口；画面中随时点鼠标右键或按 P 呼出本控制面板。")
-        tipLbl.font = .systemFont(ofSize: 12)
-        tipLbl.textColor = NSColor.white.withAlphaComponent(0.62)
-        tipLbl.maximumNumberOfLines = 3
-        vStack.addArrangedSubview(tipLbl)
-        tipLbl.widthAnchor.constraint(equalTo: vStack.widthAnchor, constant: -52).isActive = true
-
-        card.addSubview(vStack)
-        NSLayoutConstraint.activate([
-            card.widthAnchor.constraint(equalToConstant: 660),
-            vStack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            vStack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            vStack.topAnchor.constraint(equalTo: card.topAnchor),
-            vStack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-        ])
-        parent.addSubview(card)
-        NSLayoutConstraint.activate([
-            card.centerXAnchor.constraint(equalTo: parent.centerXAnchor),
-            card.centerYAnchor.constraint(equalTo: parent.centerYAnchor),
-        ])
-        controlCard = card
-
-        syncControlPanelUI()
-        updateOverlayVisibility()
+    private func activeScreenIndex() -> Int {
+        let id = activeScreen.map { displayID($0) } ?? 0
+        return NSScreen.screens.firstIndex { displayID($0) == id } ?? -1
     }
 
-    private func syncControlPanelUI() {
-        guard controlCard != nil else { return }
-
-        // Status pill
-        if pipeline.isStreaming {
-            let srcKind = pipeline.usingRawUSB ? "USB 256KB 无损直读" : "系统免驱采集"
-            let sz = pipeline.currentSourceSize.isEmpty ? "" : " · \(pipeline.currentSourceSize)"
-            statusBadgeLabel.stringValue = "🟢 已连接：\(pipeline.currentActiveDeviceName)\(sz) · \(srcKind)"
-            closeCardButton.isHidden = false
-        } else {
-            statusBadgeLabel.stringValue = "🟡 未检测到外接 PS5 采集卡 — 插上采集卡自动出画面（无需重启软件）"
-            closeCardButton.isHidden = true
-        }
-
-        // Device popup
-        let devs = videoDevices()
-        let curPref = pipeline.currentDevicePref
-        devicePopup.removeAllItems()
-        devicePopup.addItem(withTitle: "自动识别外接 PS5 采集卡（推荐）")
-        cachedMenuDevices = [""]
-        var selDevIdx = 0
-        for d in devs {
-            let isExt = (d.deviceType == .external)
-            let tag = isExt ? " [外接]" : " [内置/其它]"
-            devicePopup.addItem(withTitle: d.localizedName + tag)
-            cachedMenuDevices.append(d.localizedName)
-            if !curPref.isEmpty && d.localizedName.localizedCaseInsensitiveContains(curPref) {
-                selDevIdx = cachedMenuDevices.count - 1
-            }
-        }
-        devicePopup.selectItem(at: selDevIdx)
-
-        // Screen popup
-        let screens = NSScreen.screens
-        cachedMenuScreens = screens
-        screenPopup.removeAllItems()
-        let curScrID = activeScreen.map { displayID($0) } ?? 0
-        var selScrIdx = 0
-        for (idx, s) in screens.enumerated() {
-            let pxW = Int(s.frame.width * s.backingScaleFactor)
-            let pxH = Int(s.frame.height * s.backingScaleFactor)
-            screenPopup.addItem(withTitle: "\(s.localizedName)（\(pxW)×\(pxH)）")
-            if displayID(s) == curScrID { selScrIdx = idx }
-        }
-        if !screens.isEmpty { screenPopup.selectItem(at: selScrIdx) }
-
-        // Resolution segment
-        let mw = pipeline.currentMaxWidth
-        resSegment.selectedSegment = (mw == 0) ? 0 : (mw <= 1920 ? 2 : 1)
-
-        // Mode segment
-        switch pipeline.mode {
-        case .pass: modeSegment.selectedSegment = 0
-        case .rifeFast: modeSegment.selectedSegment = 1
-        case .rifeMedium: modeSegment.selectedSegment = 2
-        case .rifeBalanced: modeSegment.selectedSegment = 3
-        default: modeSegment.selectedSegment = -1
-        }
-
-        // Sharpness segment
-        let sh = pipeline.currentSharpness
-        sharpSegment.selectedSegment = sh < 0.15 ? 0 : (sh < 0.75 ? 1 : 2)
-
-        // Audio + Gain
-        let audOn = pipeline.isAudioEnabled
-        audioCheckbox.state = audOn ? .on : .off
-        gainPopup.isEnabled = audOn
-        let g = pipeline.currentAudioGainDb
-        let gIdx = g < 6 ? 0 : (g < 16 ? 1 : (g < 23 ? 2 : 3))
-        gainPopup.selectItem(at: gIdx)
-
-        // Action buttons
-        benchActionButton.isEnabled = !runningBenchmark && !installingHelper
-        benchActionButton.title = runningBenchmark ? "正在测算本机算力…" : "⚡ 一键实测本机能带几档 (B)"
-
-        let helperOK = RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
-        rawUSBActionButton.isEnabled = !installingHelper && !runningBenchmark
-        if pipeline.usingRawUSB {
-            rawUSBActionButton.title = "10G 直读：已开启 (U)"
-        } else if helperOK {
-            rawUSBActionButton.title = "启用 10G 无损直读 (U)"
-        } else {
-            rawUSBActionButton.title = "安装 10G 采集卡直读组件…"
-        }
-
-        let fsText = isBorderlessFullscreen ? "❐ 退回窗口模式 (F)" : "⛶ 进入全屏游玩 (F)"
-        fullscreenActionButton.title = fsText
-        quickFullscreenButton?.title = isBorderlessFullscreen ? "❐ 窗口 (F)" : "⛶ 全屏 (F)"
+    private func makeMenuItems() -> [MenuItem] {
+        let p = pipeline
+        let modes: [Mode] = [.pass, .rifeFast, .rifeMedium, .rifeBalanced]
+        let widths = [0, 2560, 1920]
+        let sharpness: [Float] = [0.0, 0.55, 0.90]
+        let gains = [0.0, 12.0, 20.0, 26.0]
+        func notes(_ n: [String]) -> (Int) -> String { { n.indices.contains($0) ? n[$0] : "" } }
+        return [
+            MenuItem(title: "补帧档位", symbol: "square.on.square",
+                     options: { ["直通", "[4] 低延迟", "[6] 均衡", "[5] 画质"] },
+                     current: { modes.firstIndex(of: p.requestedMode) ?? -1 },
+                     apply: { p.setMode(modes[$0]) },
+                     note: notes(["不补帧。没有等待，只有 30 帧。", "单帧约 17 ms，延迟约 68 ms。最稳。", "单帧约 25 ms。画质更好，余量小。", "M1 Pro 跟不上 2K，会掉到约 48 帧。"])),
+            MenuItem(title: "采集分辨率", symbol: "viewfinder",
+                     options: { ["4K", "2K", "1080p"] },
+                     current: { let w = p.currentMaxWidth; return w == 0 ? 0 : (w <= 1920 ? 2 : 1) },
+                     apply: { p.selectMaxWidth(widths[$0]) },
+                     note: notes(["M1 Pro 补不动 4K，只适合直通。", "推荐。PS5 输出 4K，这里缩到 2K 再补帧。", "最省，画面最软。"])),
+            MenuItem(title: "MetalFX 超分", symbol: "arrow.up.left.and.arrow.down.right",
+                     options: { ["关", "开"] },
+                     current: { p.upscaler.mode == .metalfx ? 1 : 0 },
+                     apply: { if ($0 == 1) != (p.upscaler.mode == .metalfx) { p.toggleUpscale() } },
+                     note: notes(["系统直接拉伸到 4K，文字发虚。", "用 MetalFX 放大到 4K，每帧约 2 ms。"])),
+            MenuItem(title: "锐化", symbol: "triangle",
+                     options: { ["关", "0.55", "0.90"] },
+                     current: { let v = p.currentSharpness; return v < 0.15 ? 0 : (v < 0.75 ? 1 : 2) },
+                     apply: { p.setSharpness(sharpness[$0]) },
+                     note: notes(["开 MetalFX 时推荐关。", "标准锐化。", "强锐化，噪点会变明显。"])),
+            MenuItem(title: "状态条", symbol: "chart.xyaxis.line",
+                     options: { ["隐藏", "常显"] },
+                     current: { [unowned self] in self.hudPinned ? 1 : 0 },
+                     apply: { [unowned self] in self.setHudPinned($0 == 1) },
+                     note: notes(["游玩时屏幕上只有画面。", "角落常显帧率和延迟。"])),
+            MenuItem(title: "声音", symbol: "speaker.wave.2",
+                     options: { ["静音", "+0 dB", "+12 dB", "+20 dB", "+26 dB"] },
+                     current: {
+                         guard p.isAudioEnabled else { return 0 }
+                         let g = p.currentAudioGainDb
+                         return 1 + (g < 6 ? 0 : (g < 16 ? 1 : (g < 23 ? 2 : 3)))
+                     },
+                     apply: { if $0 == 0 { p.setAudioEnabled(false) } else { p.setAudioGainDb(gains[$0 - 1]) } },
+                     note: notes(["不放采集卡的声音。", "原始音量。采集卡的声音通常很轻。", "适中放大。", "默认。声音延后，和画面对齐。", "强放大。声音大时会破音。"])),
+            MenuItem(title: "输入源", symbol: "cable.connector",
+                     options: { ["自动识别"] + videoDevices().map { $0.localizedName + ($0.deviceType == .external ? " [外接]" : "") } + ["刷新设备"] },
+                     current: {
+                         let pref = p.currentDevicePref
+                         guard !pref.isEmpty else { return 0 }
+                         return videoDevices().firstIndex { $0.localizedName.localizedCaseInsensitiveContains(pref) }.map { $0 + 1 } ?? 0
+                     },
+                     apply: { [unowned self] i in
+                         let devs = videoDevices()
+                         if i == 0 { p.selectVideoDevice("") }
+                         else if i <= devs.count { p.selectVideoDevice(devs[i - 1].localizedName) }
+                         else { self.refreshDevices() }
+                     },
+                     note: { i in
+                         let devs = videoDevices()
+                         if i == 0 { return "自动找外接采集卡。PS5 要关 HDCP，否则黑屏。" }
+                         if i <= devs.count { return devs[i - 1].deviceType == .external ? "只用这台外接设备。" : "只用这台设备。它不是外接采集卡。" }
+                         return "重新找设备。没有画面时马上连接。"
+                     }),
+            MenuItem(title: "输出屏幕", symbol: "display",
+                     options: { NSScreen.screens.map { "\($0.localizedName)（\(Int($0.frame.width * $0.backingScaleFactor))×\(Int($0.frame.height * $0.backingScaleFactor))）" } },
+                     current: { [unowned self] in self.activeScreenIndex() },
+                     apply: { [unowned self] i in
+                         let screens = NSScreen.screens
+                         if screens.indices.contains(i) { self.moveToScreen(screens[i], savePref: true) }
+                     },
+                     note: { [unowned self] i in i == self.activeScreenIndex() ? "画面在这块屏幕上。" : "把画面移到这块屏幕。" }),
+            MenuItem(title: "工具", symbol: "wrench.and.screwdriver",
+                     options: { [unowned self] in
+                         [self.runningBenchmark ? "实测中…" : "一键实测 (B)", self.isBorderlessFullscreen ? "退出全屏 (F)" : "进入全屏 (F)", "10G 直读 (U)"]
+                     },
+                     current: { -1 },
+                     apply: { [unowned self] i in
+                         switch i {
+                         case 0: self.runHardwareBenchmarkDialog()
+                         case 1: self.setBorderlessFullscreen(!self.isBorderlessFullscreen)
+                         default: self.toggleRawUSB()
+                         }
+                     },
+                     note: { [unowned self] i in
+                         switch i {
+                         case 0: return self.runningBenchmark ? "正在测算。结果会弹窗显示。" : "约 3 秒。测出本机能带哪一档。"
+                         case 1: return self.isBorderlessFullscreen ? "退回窗口模式。" : "无边框全屏。按 F 切换。"
+                         default:
+                             if p.usingRawUSB { return "已开启。再按一次切回系统采集。" }
+                             return RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
+                                 ? "绕过系统驱动直读 USB。4K60 不丢帧。" : "先安装直读组件。需要管理员密码。"
+                         }
+                     }),
+        ]
     }
 
-    private func updateOverlayVisibility() {
-        guard let controlCard, let quickBar else { return }
-        let showCard = !pipeline.isStreaming || panelManuallyShownOverVideo
-        controlCard.isHidden = !showCard
-        if showCard {
-            quickBar.isHidden = true
-            quickBarHide?.cancel()
-        } else {
-            revealQuickBarTemporarily()
-        }
+    /// Open while no stream plays; over a stream only after P (or --open-menu).
+    private func updateMenuVisibility() {
+        let streaming = pipeline.isStreaming
+        cardMenu.hint = streaming ? "← → 选卡片　↑ ↓ 选值　Return 确定　Esc 回到游戏" : "← → 选卡片　↑ ↓ 选值　Return 确定　插上采集卡后自动出画面"
+        cardMenu.stats = streaming ? "已连接 · \(pipeline.currentActiveDeviceName) \(pipeline.currentSourceSize)" : "未检测到采集卡"
+        cardMenu.setOpen(!streaming || menuOverVideo)
+        cardMenu.reload()
     }
 
-    private func revealQuickBarTemporarily() {
-        guard let quickBar, let controlCard, controlCard.isHidden else { return }
-        quickBar.isHidden = false
-        quickBarHide?.cancel()
-        let w = DispatchWorkItem { [weak self] in
-            guard let self, self.pipeline.isStreaming, self.controlCard.isHidden else { return }
-            self.quickBar.isHidden = true
-        }
-        quickBarHide = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: w)
-    }
-
-    @objc private func uiToggleControlCard(_ sender: Any?) {
-        if !pipeline.isStreaming {
-            controlCard?.isHidden = false
-            syncControlPanelUI()
-            return
-        }
-        panelManuallyShownOverVideo.toggle()
-        syncControlPanelUI()
-        updateOverlayVisibility()
-    }
-
-    @objc private func uiHideControlCard(_ sender: Any?) {
-        guard pipeline.isStreaming else { return }
-        panelManuallyShownOverVideo = false
-        updateOverlayVisibility()
+    @objc private func toggleMenu(_ sender: Any?) {
+        if pipeline.isStreaming { menuOverVideo.toggle() }
+        updateMenuVisibility()
     }
 
     @objc private func uiToggleFullscreen(_ sender: Any?) {
         setBorderlessFullscreen(!isBorderlessFullscreen)
     }
 
-    @objc private func uiRefreshDevices(_ sender: Any?) {
-        syncControlPanelUI()
-        if !pipeline.isStreaming {
-            if pipeline.start() {
-                showStatus("采集设备已连接（\(pipeline.currentSourceSize)）", force: true)
-            } else {
-                showStatus("仍未检测到外接 PS5 采集卡，请检查 USB 与 HDMI 连接", force: true)
-            }
+    private func refreshDevices() {
+        cardMenu.reload()
+        guard !pipeline.isStreaming else { return }
+        if pipeline.start() {
+            showStatus("采集设备已连接（\(pipeline.currentSourceSize)）", force: true)
+        } else {
+            showStatus("仍未检测到外接 PS5 采集卡，请检查 USB 与 HDMI 连接", force: true)
         }
     }
 
-    @objc private func uiDevicePopupChanged(_ sender: NSPopUpButton) {
-        let idx = sender.indexOfSelectedItem
-        guard cachedMenuDevices.indices.contains(idx) else { return }
-        pipeline.selectVideoDevice(cachedMenuDevices[idx])
-        syncControlPanelUI()
+    private func setHudPinned(_ on: Bool) {
+        hudPinned = on
+        Prefs.saveHudPinned(on)
+        if on { showStatus("状态常显：" + pipeline.mode.title, force: true) } else { hud.isHidden = true }
+        cardMenu.reload()
     }
 
-    @objc private func uiScreenPopupChanged(_ sender: NSPopUpButton) {
-        let idx = sender.indexOfSelectedItem
-        guard cachedMenuScreens.indices.contains(idx) else { return }
-        moveToScreen(cachedMenuScreens[idx], savePref: true)
-    }
-
-    @objc private func uiResSegmentChanged(_ sender: NSSegmentedControl) {
-        let widths = [0, 2560, 1920]
-        let idx = sender.selectedSegment
-        if widths.indices.contains(idx) {
-            pipeline.selectMaxWidth(widths[idx])
-            syncControlPanelUI()
+    private func toggleRawUSB() {
+        if !pipeline.usingRawUSB && !RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok {
+            promptInstallUVCHelper(activateAfterInstall: true)
+            return
         }
-    }
-
-    @objc private func uiModeSegmentChanged(_ sender: NSSegmentedControl) {
-        let modes: [Mode] = [.pass, .rifeFast, .rifeMedium, .rifeBalanced]
-        let idx = sender.selectedSegment
-        if modes.indices.contains(idx) {
-            pipeline.setMode(modes[idx])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }
-        }
-    }
-
-    @objc private func uiSharpSegmentChanged(_ sender: NSSegmentedControl) {
-        let vals: [Float] = [0.0, 0.55, 0.90]
-        let idx = sender.selectedSegment
-        if vals.indices.contains(idx) {
-            pipeline.setSharpness(vals[idx])
-            syncControlPanelUI()
-        }
-    }
-
-    @objc private func uiAudioCheckboxChanged(_ sender: NSButton) {
-        pipeline.setAudioEnabled(sender.state == .on)
-        syncControlPanelUI()
-    }
-
-    @objc private func uiGainPopupChanged(_ sender: NSPopUpButton) {
-        let gains = [0.0, 12.0, 20.0, 26.0]
-        let idx = sender.indexOfSelectedItem
-        if gains.indices.contains(idx) {
-            pipeline.setAudioGainDb(gains[idx])
-            syncControlPanelUI()
-        }
-    }
-
-    @objc private func uiRawUSBButtonClicked(_ sender: Any?) {
-        menuToggleRawUSB(NSMenuItem())
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.syncControlPanelUI() }
+        pipeline.toggleCaptureSource()
     }
 
     // MARK: - Menu Construction & Actions
@@ -4678,10 +4787,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         // 0. Panel, Fullscreen & Benchmark
-        let cardVisible = !(controlCard?.isHidden ?? true)
-        let panelItem = NSMenuItem(title: cardVisible ? "收起图形控制面板 (P)" : "打开图形控制面板 (P)", action: #selector(uiToggleControlCard(_:)), keyEquivalent: "")
+        let menuOpen = cardMenu.isOpen
+        let panelItem = NSMenuItem(title: menuOpen ? "收起菜单 (P)" : "打开菜单 (P)", action: #selector(toggleMenu(_:)), keyEquivalent: "")
         panelItem.target = self
-        panelItem.isEnabled = pipeline.isStreaming || !cardVisible
+        panelItem.isEnabled = pipeline.isStreaming || !menuOpen
         menu.addItem(panelItem)
 
         let fsItem = NSMenuItem(title: isBorderlessFullscreen ? "退回窗口模式 (F / Esc)" : "进入无边框全屏游玩 (F)", action: #selector(uiToggleFullscreen(_:)), keyEquivalent: "f")
@@ -4861,20 +4970,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func menuSelectMode(_ sender: NSMenuItem) {
         if let m = Mode(rawValue: sender.tag) {
             pipeline.setMode(m)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }
+            self.cardMenu.reload()
         }
     }
 
     @objc private func menuSelectSharpness(_ sender: NSMenuItem) {
         if let n = sender.representedObject as? NSNumber {
             pipeline.setSharpness(n.floatValue)
-            syncControlPanelUI()
+            cardMenu.reload()
         }
     }
 
     @objc private func menuSelectMaxWidth(_ sender: NSMenuItem) {
         pipeline.selectMaxWidth(sender.tag)
-        syncControlPanelUI()
+        cardMenu.reload()
     }
 
     @objc private func menuSelectScreen(_ sender: NSMenuItem) {
@@ -4884,16 +4993,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func menuSelectDevice(_ sender: NSMenuItem) {
         if let name = sender.representedObject as? String {
             pipeline.selectVideoDevice(name)
-            syncControlPanelUI()
+            cardMenu.reload()
         }
     }
 
     @objc private func menuToggleRawUSB(_ sender: NSMenuItem) {
-        if !pipeline.usingRawUSB && !RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok {
-            promptInstallUVCHelper(activateAfterInstall: true)
-            return
-        }
-        pipeline.toggleCaptureSource()
+        toggleRawUSB()
     }
 
     @objc private func menuInstallHelper(_ sender: NSMenuItem) {
@@ -4902,21 +5007,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func menuToggleAudio(_ sender: NSMenuItem) {
         pipeline.setAudioEnabled(!pipeline.isAudioEnabled)
-        syncControlPanelUI()
+        cardMenu.reload()
     }
 
     @objc private func menuSelectAudioGain(_ sender: NSMenuItem) {
         if let n = sender.representedObject as? NSNumber {
             pipeline.setAudioGainDb(n.doubleValue)
-            syncControlPanelUI()
+            cardMenu.reload()
         }
     }
 
     @objc private func menuToggleHud(_ sender: NSMenuItem) {
-        hudPinned.toggle()
-        Prefs.saveHudPinned(hudPinned)
-        if hudPinned { showStatus("状态常显：" + pipeline.mode.title, force: true) }
-        else { hud.isHidden = true }
+        setHudPinned(!hudPinned)
     }
 
     @objc private func menuSaveSample(_ sender: NSMenuItem) {
@@ -4944,7 +5046,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func runHardwareBenchmarkDialog() {
         guard !runningBenchmark && !installingHelper else { return }
         runningBenchmark = true
-        syncControlPanelUI()
+        cardMenu.reload()
         showStatus("正在实测本机芯片 4K / 2K / 1080p 补帧算力（约 3 秒）…", force: true)
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -4957,7 +5059,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
             DispatchQueue.main.async {
                 self.runningBenchmark = false
-                self.syncControlPanelUI()
+                self.cardMenu.reload()
                 self.window?.level = .normal
                 NSApp.activate(ignoringOtherApps: true)
 
@@ -4978,7 +5080,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
                 if resp == .alertFirstButtonReturn, let rec = rep.recommended {
                     self.pipeline.applyRecommendedPreset(mode: rec.mode, maxWidth: rec.maxWidth)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }
+                    self.cardMenu.reload()
                 } else {
                     self.showStatus("测算完成，保持当前模式：" + self.pipeline.mode.title, force: true)
                 }
@@ -5019,7 +5121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         installingHelper = true
-        syncControlPanelUI()
+        cardMenu.reload()
         showStatus("正在等待管理员授权安装 10G 直读组件…", force: true)
         let user = NSUserName()
         let appleScript = """
@@ -5067,7 +5169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     Log.shared.line("uvc helper GUI install failed: \(errMsg)")
                     self.showStatus("直读组件安装未完成，继续使用系统采集", force: true)
                 }
-                self.syncControlPanelUI()
+                self.cardMenu.reload()
             }
         }
     }
@@ -5115,9 +5217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard let self else { return }
             self.setBorderlessFullscreen(!self.isBorderlessFullscreen)
         }
-        view.onMouseActivity = { [weak self] in
-            self?.revealQuickBarTemporarily()
-        }
         view.wantsLayer = true
         view.layer = CALayer()
         view.layer?.backgroundColor = NSColor(calibratedWhite: 0.06, alpha: 1.0).cgColor
@@ -5136,9 +5235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         hud.backgroundColor = NSColor.black.withAlphaComponent(0.62)
         hud.isHidden = true
         hud.setFrameOrigin(NSPoint(x: 16, y: 16))
+        cardMenu.frame = view.bounds
+        cardMenu.autoresizingMask = [.width, .height]
+        cardMenu.items = makeMenuItems()
+        view.addSubview(cardMenu)
         view.addSubview(hud)
-
-        buildVisualOverlayUI(in: view)
 
         if opts.fullscreen {
             setBorderlessFullscreen(true)
@@ -5150,11 +5251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         pipeline.onStreamStateChange = { [weak self] active in
             guard let self else { return }
-            if active {
-                self.panelManuallyShownOverVideo = false
-            }
-            self.syncControlPanelUI()
-            self.updateOverlayVisibility()
+            if active && !self.streamActive { self.menuOverVideo = false }
+            self.streamActive = active
+            self.updateMenuVisibility()
         }
         pipeline.onStatus = { [weak self] text in
             guard let self else { return }
@@ -5169,38 +5268,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
                 return e
             }
-            switch (e.charactersIgnoringModifiers ?? "").lowercased() {
+            if self.cardMenu.isOpen {
+                switch e.keyCode {
+                case 123: self.cardMenu.moveFocus(-1); return nil
+                case 124: self.cardMenu.moveFocus(1); return nil
+                case 125: self.cardMenu.moveOption(1); return nil
+                case 126: self.cardMenu.moveOption(-1); return nil
+                case 36, 76: self.cardMenu.activate(); return nil
+                default: break
+                }
+            }
+            let key = (e.charactersIgnoringModifiers ?? "").lowercased()
+            if let digit = Int(key), let m = Mode(rawValue: digit) {
+                self.pipeline.setMode(m)
+                self.cardMenu.reload()
+                return nil
+            }
+            switch key {
             case "q": NSApp.terminate(nil); return nil
             case "f": self.setBorderlessFullscreen(!self.isBorderlessFullscreen); return nil
-            case "p": self.uiToggleControlCard(nil); return nil
+            case "p": self.toggleMenu(nil); return nil
             case "m": self.popUpMenuOnWindow(); return nil
             case "b": self.runHardwareBenchmarkDialog(); return nil
-            case "1": self.pipeline.setMode(.pass); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "2": self.pipeline.setMode(.single); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "3": self.pipeline.setMode(.tiled); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "4": self.pipeline.setMode(.rifeFast); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "5": self.pipeline.setMode(.rifeBalanced); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "6": self.pipeline.setMode(.rifeMedium); DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.syncControlPanelUI() }; return nil
-            case "k": self.pipeline.cycleSharpness(); self.syncControlPanelUI(); return nil
+            case "k": self.pipeline.cycleSharpness(); self.cardMenu.reload(); return nil
             case "x": self.pipeline.toggleUpscale(); return nil
-            case "u": self.menuToggleRawUSB(NSMenuItem()); return nil
+            case "u": self.toggleRawUSB(); return nil
             case "s":
                 self.pipeline.collector.saveManual { [weak self] msg in self?.showStatus(msg, force: true) }
                 return nil
             case "h":
-                self.hudPinned.toggle()
-                Prefs.saveHudPinned(self.hudPinned)
-                if self.hudPinned { self.showStatus("状态常显：" + self.pipeline.mode.title, force: true) } else { self.hud.isHidden = true }
+                self.setHudPinned(!self.hudPinned)
                 return nil
             default: break
             }
-            if e.keyCode == 53 { // Esc: exit fullscreen back to window first, or hide overlay card if over video
+            if e.keyCode == 53 { // Esc: close the menu over a stream first, then leave fullscreen
+                if self.pipeline.isStreaming && self.menuOverVideo {
+                    self.menuOverVideo = false
+                    self.updateMenuVisibility()
+                    return nil
+                }
                 if self.isBorderlessFullscreen {
                     self.setBorderlessFullscreen(false)
-                    return nil
-                } else if self.pipeline.isStreaming && self.panelManuallyShownOverVideo {
-                    self.panelManuallyShownOverVideo = false
-                    self.updateOverlayVisibility()
                     return nil
                 }
                 return e
@@ -5215,8 +5323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } else if pipeline.start() {
             showStatus("模式：" + pipeline.mode.title, force: true)
         } else {
-            syncControlPanelUI()
-            updateOverlayVisibility()
+            updateMenuVisibility()
             pipeline.startWaitingForDevice()
         }
         if opts.seconds > 0 {
