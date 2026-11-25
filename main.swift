@@ -971,8 +971,8 @@ enum Mode: Int {
     var title: String {
         switch self {
         case .pass: return tr("直通", "Passthrough")
-        case .single: return tr("系统 720p", "System 720p")
-        case .tiled: return tr("系统 2K", "System 2K")
+        case .single: return tr("系统补帧（720p）", "System (720p)")
+        case .tiled: return tr("系统补帧（分块）", "System (tiled)")
         case .rifeFast: return tr("快速", "Fast")
         case .rifeBalanced: return tr("画质", "Quality")
         case .rifeMedium: return tr("均衡", "Balanced")
@@ -1037,7 +1037,6 @@ final class SampleCollector {
     private var manualCount = 0
     private var pendingAuto: (kind: Kind, triggerSeq: Int, dueSeq: Int)?
 
-    var totalSaved: Int { stateLock.lock(); defer { stateLock.unlock() }; return savedTotal }
 
     init() {
         guard opts.collect, !opts.list, !opts.selftest else { return }
@@ -1181,13 +1180,13 @@ final class SampleCollector {
 
     /// Key S: snapshot the last ~1 s (up to 30 frames) immediately without stalling gameplay.
     func saveManual(notify: @escaping (String) -> Void) {
-        guard opts.collect else { DispatchQueue.main.async { notify(tr("样本保存已关闭（--no-collect）", "Sample saving is off (--no-collect)")) }; return }
+        guard opts.collect else { DispatchQueue.main.async { notify(tr("画面保存已关闭（--no-collect）", "Saving is off (--no-collect)")) }; return }
         ringQueue.async {
             guard self.count >= 2, self.frameBytes > 0 else {
-                DispatchQueue.main.async { notify(tr("还没有可保存的帧", "No frames to save yet")) }; return
+                DispatchQueue.main.async { notify(tr("还没有可保存的画面", "Nothing to save yet")) }; return
             }
             guard self.manualCount < self.manualSessionLimit else {
-                DispatchQueue.main.async { notify(tr("已达上限：\(self.manualSessionLimit) 组", "Limit reached: \(self.manualSessionLimit) samples")) }; return
+                DispatchQueue.main.async { notify(tr("本次最多保存 \(self.manualSessionLimit) 次", "Limit reached: \(self.manualSessionLimit) saves")) }; return
             }
             self.manualCount += 1
             let idx = self.manualCount
@@ -1239,7 +1238,7 @@ final class SampleCollector {
                 Log.shared.line(String(format: "sample saved: %@ (%d frames, %dx%d, allDiff %.1f center %.1f outer %.1f gap %.1f ms)",
                                        folderName, take, w, h, trigMeta.allDiff, trigMeta.centerDiff, trigMeta.outerDiff, trigMeta.gapMs))
                 if let notify {
-                    DispatchQueue.main.async { notify(tr("已保存 \(take) 帧（\(folderName)）", "Saved \(take) frames (\(folderName))")) }
+                    DispatchQueue.main.async { notify(tr("已保存最近 1 秒（\(take) 帧）", "Saved the last second (\(take) frames)")) }
                 }
             } catch {
                 Log.shared.line("sample save failed: \(error.localizedDescription)")
@@ -2542,7 +2541,7 @@ enum HardwareBenchmark {
         if let rec = bestFallback {
             if rec.maxWidth == 0 && rec.mode == .rifeFast {
                 if let twoKMed = findEntry(2560, .rifeMedium), twoKMed.isSmooth {
-                    altNote = tr("动作更细：", "Smoother motion: ") + twoKMed.fullPresetLabel + String(format: " (p95 %.1f ms)", twoKMed.p95Ms)
+                    altNote = tr("补帧更准：", "Better interpolation: ") + twoKMed.fullPresetLabel + String(format: " (p95 %.1f ms)", twoKMed.p95Ms)
                 }
             } else if rec.maxWidth == 0 && rec.mode == .rifeBalanced, rec.p95Ms > 21.0 {
                 if let fourKMed = findEntry(0, .rifeMedium), fourKMed.isSmooth {
@@ -3281,7 +3280,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         sharpLock.unlock()
         Prefs.saveSharpness(clamped)
         Log.shared.line("sharpness: \(clamped)")
-        let note = tr("锐化：", "Sharpen: ") + label + "\u{3000}\u{3000}" + (inRife ? tr("按 K 切换", "Press K to change") : tr("只在快速、均衡、画质档生效", "Works only in Fast, Balanced and Quality"))
+        let note = tr("锐化：", "Sharpen: ") + label + "\u{3000}\u{3000}" + (inRife ? tr("按 K 切换", "Press K to switch") : tr("只在快速、均衡、画质档生效", "Works only in Fast, Balanced and Quality"))
         DispatchQueue.main.async { self.onStatus?(note) }
     }
 
@@ -3308,7 +3307,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let m: UpscaleMode = upscaler.mode == .off ? .metalfx : .off
         upscaler.mode = m
         Log.shared.line("upscale: \(m.rawValue)")
-        DispatchQueue.main.async { self.onStatus?(tr("放大：", "Upscale: ") + (m == .off ? tr("关", "Off") : "MetalFX") + "\u{3000}\u{3000}" + tr("按 X 切换", "Press X to change")) }
+        DispatchQueue.main.async { self.onStatus?("MetalFX: " + (m == .off ? tr("关", "Off") : tr("开", "On")) + "\u{3000}\u{3000}" + tr("按 X 切换", "Press X to switch")) }
     }
 
     func cycleSharpness() {
@@ -3326,7 +3325,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         resetTiming()
         ensureInterpolators()
         Log.shared.line("mode: \(m.rawValue) \(m.title)")
-        let text = tr("补帧：", "Interpolation: ") + m.title + "\u{3000}\u{3000}" + tr("按数字键切换", "Number keys change it")
+        let text = tr("补帧：", "Interpolation: ") + m.title + "\u{3000}\u{3000}" + tr("按 1–6 切换", "Press 1–6 to switch")
         DispatchQueue.main.async { self.onStatus?(text) }
     }
 
@@ -3580,7 +3579,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     if now60 != contentIs60 {
                         contentIs60 = now60
                         Log.shared.line(String(format: "game content is ~%d fps (repeated frames %.0f%%)", now60 ? 60 : 30, share * 100))
-                        if mode != .pass && opts.autoPass { queue.async { self.resetTiming() }; let t = now60 ? tr("信号是 60 帧，自动直通", "60 fps input. Passthrough") : tr("信号是 30 帧，开始补帧", "30 fps input. Interpolating"); DispatchQueue.main.async { self.onStatus?(t) } }
+                        if mode != .pass && opts.autoPass { queue.async { self.resetTiming() }; let t = now60 ? tr("画面已是 60 帧，自动直通", "The game runs at 60 fps. Passthrough on") : tr("画面是 30 帧，开始补帧", "The game runs at 30 fps. Interpolating"); DispatchQueue.main.async { self.onStatus?(t) } }
                     }
                 }
             } else { recentDiffs.removeAll() }
@@ -3666,7 +3665,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if fastSource && !fastSourceNoted {
             fastSourceNoted = true
             Log.shared.line("source is already ~60 fps on a 60 Hz screen: passing through")
-            DispatchQueue.main.async { self.onStatus?(tr("信号是 60 帧，自动直通", "60 fps input. Passthrough")) }
+            DispatchQueue.main.async { self.onStatus?(tr("画面已是 60 帧，自动直通", "The game runs at 60 fps. Passthrough on")) }
         }
         if passing || fastSource {
             if srcGap > 5 && srcGap < 60 {
@@ -3967,8 +3966,6 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             let snap = curAudio.takeSnapshot()
             Log.shared.line(String(format: "   audio: %d buffers, delayed %.0f ms, clock resyncs %d, renderer failures %d", snap.buffers, snap.delay, snap.resyncs, snap.failures) + " | " + snap.dbg)
         }
-        let sc = collector.totalSaved
-        if sc > 0 { stats += " · " + String(format: tr("样本 %d", "%d samples"), sc) }
         DispatchQueue.main.async { self.onStats?(stats) }
         holdMs.removeAll()
         frames = 0; mids = 0; lateMids = 0; lateOrig = 0; failed = 0; droppedMids = 0
@@ -4726,20 +4723,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      note: notes([tr("不补帧，不加延迟。60 帧游戏用这档。", "No interpolation, no added delay. Use it for 60 fps games."),
                                   tr("每帧约 17 ms，总延迟约 68 ms。最稳。", "About 17 ms per frame, 68 ms total delay. Most stable."),
                                   tr("每帧约 25 ms。画面更好，余量小。", "About 25 ms per frame. Better picture, less headroom."),
-                                  tr("最慢。先用测速确认跑得动。", "Slowest. Run the benchmark first.")])),
+                                  tr("最慢。先测速，确认这台 Mac 跑得动。", "Slowest. Run the benchmark first to check this Mac can hold it.")])),
             MenuItem(title: tr("分辨率", "Resolution"), symbol: "viewfinder",
                      options: { ["4K", "2K", "1080p"] },
                      current: { let w = p.currentMaxWidth; return w == 0 ? 0 : (w <= 1920 ? 2 : 1) },
                      apply: { p.selectMaxWidth(widths[$0]) },
-                     note: notes([tr("原样采集 4K。补帧通常跑不动，适合直通。", "Full 4K. Usually too slow to interpolate. Good for passthrough."),
+                     note: notes([tr("按 4K 采集。补帧通常跑不动，适合直通。", "Captures at 4K. Usually too slow to interpolate. Good for passthrough."),
                                   tr("推荐。4K 信号缩到 2K 再补帧。", "Recommended. Scales 4K down to 2K before interpolation."),
                                   tr("最快，画面最软。", "Fastest, softest picture.")])),
-            MenuItem(title: tr("放大", "Upscale"), symbol: "arrow.up.left.and.arrow.down.right",
-                     options: { [tr("关", "Off"), "MetalFX"] },
+            MenuItem(title: "MetalFX", symbol: "arrow.up.left.and.arrow.down.right",
+                     options: { [tr("关", "Off"), tr("开", "On")] },
                      current: { p.upscaler.mode == .metalfx ? 1 : 0 },
                      apply: { if ($0 == 1) != (p.upscaler.mode == .metalfx) { p.toggleUpscale() } },
-                     note: notes([tr("系统拉伸到屏幕大小，文字偏软。", "The system stretches the picture. Text looks soft."),
-                                  tr("MetalFX 放大到屏幕大小，每帧约 2 ms。", "MetalFX scales to the screen. About 2 ms per frame.")])),
+                     note: notes([tr("由系统拉伸到屏幕大小，文字偏软。", "macOS stretches the picture to the screen. Text looks soft."),
+                                  tr("用 MetalFX 放大到屏幕大小，文字更清晰。每帧约 2 ms。", "MetalFX scales the picture to the screen. Text is sharper. About 2 ms per frame.")])),
             MenuItem(title: tr("锐化", "Sharpen"), symbol: "triangle",
                      options: { [tr("关", "Off"), tr("标准", "Normal"), tr("强", "Strong")] },
                      current: { let v = p.currentSharpness; return v < 0.15 ? 0 : (v < 0.75 ? 1 : 2) },
@@ -4800,7 +4797,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      note: { _ in "中文 / English" }),
             MenuItem(title: tr("工具", "Tools"), symbol: "wrench.and.screwdriver",
                      options: { [unowned self] in
-                         [self.runningBenchmark ? tr("测速中…", "Running…") : tr("测速 (B)", "Benchmark (B)"),
+                         [self.runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速 (B)", "Benchmark (B)"),
                           self.isBorderlessFullscreen ? tr("退出全屏 (F)", "Exit Fullscreen (F)") : tr("全屏 (F)", "Fullscreen (F)"),
                           tr("USB 直读 (U)", "Raw USB (U)")]
                      },
@@ -4814,13 +4811,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      },
                      note: { [unowned self] i in
                          switch i {
-                         case 0: return self.runningBenchmark ? tr("测速中，结果会弹窗显示。", "Running. The results open in a window.") : tr("约 3 秒，测出这台 Mac 能用哪一档。", "About 3 s. Finds the settings this Mac can hold.")
+                         case 0: return self.runningBenchmark ? tr("测速中，完成后弹窗显示结果。", "Benchmarking. The results open in a window.") : tr("约 3 秒，测出这台 Mac 能用哪一档。", "About 3 s. Finds the settings this Mac can hold.")
                          case 1: return self.isBorderlessFullscreen ? tr("回到窗口。", "Back to a window.") : tr("无边框全屏。", "Borderless fullscreen.")
                          default:
                              if p.usingRawUSB { return tr("已开启。再按一次关闭。", "On. Press again to turn it off.") }
                              return RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
                                  ? tr("绕过系统驱动读 USB，4K60 不丢帧。", "Reads USB directly. 4K60 without drops.")
-                                 : tr("要先安装组件，需要管理员密码。", "Needs a helper first. Asks for an admin password.")
+                                 : tr("需要先安装直读组件，安装时要管理员密码。", "Install the USB helper first. It asks for an admin password.")
                          }
                      }),
         ]
@@ -4968,7 +4965,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
 
         let menuOpen = cardMenu.isOpen
-        add(menuOpen ? tr("隐藏菜单", "Hide Menu") : tr("显示菜单", "Show Menu"), #selector(toggleMenu(_:)), key: "p", enabled: pipeline.isStreaming || !menuOpen)
+        add(menuOpen ? tr("隐藏设置", "Hide Settings") : tr("显示设置", "Show Settings"), #selector(toggleMenu(_:)), key: "p", enabled: pipeline.isStreaming || !menuOpen)
         let fs = add(isBorderlessFullscreen ? tr("退出全屏", "Exit Fullscreen") : tr("全屏", "Fullscreen"), #selector(uiToggleFullscreen(_:)), key: "f")
         fs.keyEquivalentModifierMask = [.command]
         add(runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速…", "Benchmark…"), #selector(menuRunBenchmark(_:)), key: "b",
@@ -4978,12 +4975,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let header = NSMenuItem(title: tr("补帧", "Interpolation"), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        var sysAvail = false
-        if #available(macOS 26.0, *) { sysAvail = true }
         let curMode = pipeline.mode
-        for m in [Mode.pass, .rifeFast, .rifeMedium, .rifeBalanced, .single, .tiled] {
-            let isSystem = m == .single || m == .tiled
-            add(m.title, #selector(menuSelectMode(_:)), key: String(m.rawValue), on: curMode == m, enabled: !isSystem || sysAvail).tag = m.rawValue
+        for m in [Mode.pass, .rifeFast, .rifeMedium, .rifeBalanced] {
+            add(m.title, #selector(menuSelectMode(_:)), key: String(m.rawValue), on: curMode == m).tag = m.rawValue
         }
         menu.addItem(.separator())
 
@@ -4994,7 +4988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 add(label, #selector(menuSelectMaxWidth(_:)), on: on, to: sub).tag = mw
             }
         }
-        add(tr("MetalFX 放大", "MetalFX Upscale"), #selector(menuToggleUpscale(_:)), key: "x", on: pipeline.upscaler.mode == .metalfx)
+        add("MetalFX", #selector(menuToggleUpscale(_:)), key: "x", on: pipeline.upscaler.mode == .metalfx)
         let curSharp = pipeline.currentSharpness
         submenu(tr("锐化", "Sharpen")) { sub in
             for (label, val) in [(tr("关", "Off"), Float(0.0)), (tr("标准", "Normal"), 0.55), (tr("强", "Strong"), 0.90)] {
@@ -5038,7 +5032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(.separator())
 
         add(tr("状态条", "Stats"), #selector(menuToggleHud(_:)), key: "h", on: hudPinned)
-        add(tr("保存样本", "Save Sample"), #selector(menuSaveSample(_:)), key: "s")
+        add(tr("保存最近 1 秒画面", "Save Last Second"), #selector(menuSaveSample(_:)), key: "s")
         add(tr("显示日志", "Show Log"), #selector(menuRevealLog(_:)))
         submenu(tr("语言", "Language")) { sub in
             for l in Lang.allCases {
