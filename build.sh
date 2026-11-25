@@ -64,7 +64,8 @@ if [[ "${CLEAN_DIST_BUILD:-0}" == "1" ]]; then
         if [[ -f "$APP/Contents/Resources/helper/macap-uvc-helper" ]]; then
             codesign --force --sign - --timestamp=none "$APP/Contents/Resources/helper/macap-uvc-helper"
         fi
-        codesign --force --sign - --timestamp=none "$APP"
+        # Same as local builds: name the bundle id so an update keeps the camera and microphone permission.
+        codesign --force --sign - --timestamp=none --requirements '=designated => identifier "io.github.m2cha4l.macap"' "$APP"
     fi
 else
     ID=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/{print $2; exit}')

@@ -2,6 +2,8 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l) [![Afdian](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00)
+
 Macap turns a PS5's 30 fps picture into 60 fps in real time on an Apple Silicon Mac. It reads the picture from an HDMI capture card. It does not stream over the network and does not record the screen. The interface is in English, Simplified Chinese, Hindi, Spanish, Arabic, French and Japanese.
 
 https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
@@ -21,8 +23,8 @@ https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
 
 ## Install
 
-1. Open the `.dmg` and drag Macap.app to Applications.
-2. If macOS cannot verify the developer, Control-click Macap.app and choose Open.
+1. Download `Macap-v1.0.0-macOS-arm64.dmg` from [Releases](https://github.com/M2cha4l/Macap/releases), open it, and drag Macap.app to Applications.
+2. Open Macap. Macap is not notarized by Apple, so macOS first says it cannot verify the developer. Click Done, open System Settings › Privacy & Security, scroll to Security, click Open Anyway, and confirm. You do this once.
 3. Allow camera and microphone access.
 4. Press `B` to benchmark. After about 3 s, a window shows the settings this Mac can hold, and you can apply them.
 
@@ -93,14 +95,6 @@ You need the Xcode Command Line Tools. Shaders compile at run time, so Xcode its
 - Interpolation adds about 70–90 ms of delay. A wired controller on the PS5 helps.
 - When the camera turns fast and far, character edges sometimes show a faint outline.
 - A background task that fills the GPU (a local LLM, rendering) makes frames late and drops them.
-
-## Support Macap
-
-Macap is free and open source. If it helps you, you can buy me a coffee:
-
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l) [![Afdian](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00)
-
-Ko-fi takes cards and PayPal. 爱发电 (Afdian) takes WeChat Pay and Alipay.
 
 ## Credits
 

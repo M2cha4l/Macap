@@ -80,32 +80,32 @@ Requires an Apple Silicon Mac (M1 to M5) with macOS 14 or later.
 
 安装
 1. 把 Macap.app 拖进 Applications。
-2. 如果系统说无法验证开发者：按住 Control 点 Macap.app，选「打开」。
+2. 打开 Macap。如果系统说无法验证开发者：点「完成」，打开 系统设置 › 隐私与安全性，点「仍要打开」。
 3. 允许摄像头和麦克风权限。
 
 PS5 设置
-1. 关闭 HDCP（系统 › HDMI）。不关会黑屏。
+1. 关闭 HDCP（设定 › 系统 › HDMI）。不关会黑屏。
 2. 关闭 HDR、VRR 和 120Hz 输出。
 3. 分辨率设为 2160p 或 1080p，60Hz。
-4. 声音输出设为 2 声道线性 PCM。
+4. 声音输出设为线性 PCM。
 
 选档
 按 B 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置。
 
 按键
-P 菜单 · F 全屏 · B 测速 · 1–4 直通/快速/均衡/画质 · X MetalFX · K 锐化 · H 状态条 · Q 退出
-语言：菜单 › 语言 / Language
+P 设置 · F 全屏 · B 测速 · 1–4 直通/快速/均衡/画质 · X MetalFX · K 锐化 · H 状态条 · Q 退出
+语言：菜单栏 Macap › 语言 / Language
 
 Install
 1. Drag Macap.app to Applications.
-2. If macOS cannot verify the developer, Control-click Macap.app and choose Open.
+2. Open Macap. If macOS cannot verify the developer, click Done, then System Settings › Privacy & Security › Open Anyway.
 3. Allow camera and microphone access.
 
 PS5 settings
-1. Turn off HDCP (System › HDMI). If it is on, the picture is black.
+1. Turn off HDCP (Settings › System › HDMI). If it is on, the picture is black.
 2. Turn off HDR, VRR and 120Hz output.
 3. Set the resolution to 2160p or 1080p at 60Hz.
-4. Set audio output to 2-channel Linear PCM.
+4. Set audio output to Linear PCM.
 
 Press B to benchmark. After about 3 s, a window shows the settings this Mac can hold.
 TXT

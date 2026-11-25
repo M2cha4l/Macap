@@ -140,7 +140,7 @@ def scan_path(target: Path, extra_tokens: list[tuple[str, bytes]], findings: lis
         try:
             out = subprocess.check_output(
                 ["hdiutil", "attach", "-readonly", "-nobrowse", "-noverify", "-plist", "-mountpoint", mount_dir, str(target)],
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.DEVNULL,   # macOS 27 prints a deprecation warning that would break the plist
             )
             pl = plistlib.loads(out)
             for ent in pl.get("system-entities", []):

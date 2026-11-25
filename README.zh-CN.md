@@ -2,6 +2,8 @@
 
 [English](README.md) · **简体中文**
 
+[![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00) [![Ko-fi](https://img.shields.io/badge/Ko--fi-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l)
+
 用 Mac 的显卡把 PS5 的 30 帧画面实时补到 60 帧。画面从 HDMI 采集卡读入，不走网络串流，也不录屏。界面支持英语、简体中文、印地语、西班牙语、阿拉伯语、法语和日语。
 
 https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
@@ -21,8 +23,8 @@ https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
 
 ## 安装
 
-1. 打开 `.dmg`，把 Macap.app 拖进「应用程序」。
-2. 如果系统说无法验证开发者：按住 Control 点 Macap.app，选「打开」。
+1. 从 [Releases](https://github.com/M2cha4l/Macap/releases) 下载 `Macap-v1.0.0-macOS-arm64.dmg`，打开后把 Macap.app 拖进「应用程序」。
+2. 打开 Macap。Macap 没有经过 Apple 公证，所以 macOS 第一次会提示无法验证开发者。点「完成」，打开 系统设置 › 隐私与安全性，滚到「安全性」，点「仍要打开」并确认。只需要做一次。
 3. 允许摄像头和麦克风权限。
 4. 按 `B` 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置，可以直接应用。
 
@@ -93,14 +95,6 @@ M5 Max（40 核显卡）实测，每帧耗时：
 - 补帧大约增加 70–90 ms 延迟。手柄用有线连接 PS5 会更跟手。
 - 镜头快速大幅转动时，人物边缘偶尔有半透明轮廓。
 - 后台有占满显卡的任务（本地大模型、渲染）时，补帧会超时掉帧。
-
-## 支持 Macap
-
-Macap 免费开源。如果它对你有用，欢迎请我喝杯咖啡：
-
-[![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00) [![Ko-fi](https://img.shields.io/badge/Ko--fi-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l)
-
-爱发电支持微信和支付宝，Ko-fi 支持信用卡和 PayPal。
 
 ## 致谢
 
