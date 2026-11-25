@@ -960,6 +960,9 @@ enum Mode: Int {
     case rifeFast = 4      // 30 -> 60 on the GPU, whole frame at capture size, motion estimated at 1/4 size
     case rifeBalanced = 5  // same, motion estimated at 1/2 size
     case rifeMedium = 6    // "4.5 tier": motion estimated at 1/3 size (1280x768 at 4K), full 4K warp+blend
+    /// Number keys in menu order. The raw values stay as they were: saved settings and --mode use them.
+    static let byKey: [Mode] = [.pass, .rifeFast, .rifeMedium, .rifeBalanced, .single, .tiled]
+    var key: Int { Mode.byKey.firstIndex(of: self)! + 1 }
     var rifeTier: RifeQualityTier? {
         switch self {
         case .rifeFast: return .fast
@@ -3250,7 +3253,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         liveOffsetMs = 0; prevMidSlot = 0; fastSourceNoted = false; warmup = 0
     }
 
-    /// Switch mode while running (keys 1-6 or menu). Applied at the next frame, on the processing thread.
+    /// Switch mode while running (number keys or menu). Applied at the next frame, on the processing thread.
     func setMode(_ m: Mode) {
         if m == .single || m == .tiled {
             if #unavailable(macOS 26.0) {
@@ -3325,7 +3328,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         resetTiming()
         ensureInterpolators()
         Log.shared.line("mode: \(m.rawValue) \(m.title)")
-        let text = tr("补帧：", "Interpolation: ") + m.title + "\u{3000}\u{3000}" + tr("按 1–6 切换", "Press 1–6 to switch")
+        let text = tr("补帧：", "Interpolation: ") + m.title + "\u{3000}\u{3000}" + tr("按 1–4 切换", "Press 1–4 to switch")
         DispatchQueue.main.async { self.onStatus?(text) }
     }
 
@@ -4542,7 +4545,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private let windowedStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
     private let fullscreenWindowLevel = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
-    private let controlMenu = NSMenu()
 
     private var desiredWindowLevel: NSWindow.Level {
         isBorderlessFullscreen ? fullscreenWindowLevel : .normal
@@ -4886,13 +4888,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     // MARK: - Menu Construction & Actions
 
+    /// The menu bar: the app menu, then one menu per subject. Each menu is rebuilt from the live state when it opens.
+    private var sectionFillers: [ObjectIdentifier: (NSMenu) -> Void] = [:]
+
+    private var menuSections: [(title: String, fill: (NSMenu) -> Void)] {
+        [(tr("补帧", "Interpolation"), fillInterpolationMenu),
+         (tr("画面", "Picture"), fillPictureMenu),
+         (tr("输入", "Input"), fillInputMenu),
+         (tr("声音", "Audio"), fillAudioMenu),
+         (tr("显示", "View"), fillViewMenu),
+         (tr("帮助", "Help"), fillHelpMenu)]
+    }
+
     private func setupMainMenu() {
         let main = NSMenu()
+        sectionFillers.removeAll()
 
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: tr("关于 Macap", "About Macap"), action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(.sectionHeader(title: tr("语言", "Language")))
+        for l in Lang.allCases { addItem(l.name, #selector(menuSelectLanguage(_:)), on: l == Lang.current, to: appMenu).representedObject = l.rawValue }
         appMenu.addItem(.separator())
         let hideItem = NSMenuItem(title: tr("隐藏 Macap", "Hide Macap"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hideItem.keyEquivalentModifierMask = [.command]
@@ -4904,12 +4922,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         appMenu.addItem(quitItem)
         appItem.submenu = appMenu
 
-        let ctrlItem = NSMenuItem(title: tr("控制", "Controls"), action: nil, keyEquivalent: "")
-        controlMenu.title = ctrlItem.title
-        controlMenu.delegate = self
-        ctrlItem.submenu = controlMenu
-        main.addItem(ctrlItem)
-
+        for section in menuSections {
+            let sub = NSMenu(title: section.title)
+            sub.delegate = self
+            sectionFillers[ObjectIdentifier(sub)] = section.fill
+            let item = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
+            item.submenu = sub
+            main.addItem(item)
+        }
         NSApp.mainMenu = main
     }
 
@@ -4922,12 +4942,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        populateSettingsMenu(menu)
+        guard let fill = sectionFillers[ObjectIdentifier(menu)] else { return }
+        menu.removeAllItems()
+        menu.autoenablesItems = false
+        fill(menu)
     }
 
+    /// Right click or M: the same menus as the menu bar, one submenu each.
     private func buildPopupSettingsMenu() -> NSMenu {
         let m = NSMenu()
-        populateSettingsMenu(m)
+        m.autoenablesItems = false
+        for section in menuSections {
+            let sub = NSMenu(title: section.title)
+            sub.autoenablesItems = false
+            section.fill(sub)
+            let item = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
+            item.submenu = sub
+            m.addItem(item)
+        }
         return m
     }
 
@@ -4942,105 +4974,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     /// The single-key shortcuts are handled by the key monitor before any menu sees them;
     /// a modifier-free key equivalent only shows the key at the right edge of the item.
-    private func populateSettingsMenu(_ menu: NSMenu) {
-        menu.removeAllItems()
-        menu.autoenablesItems = false
+    @discardableResult
+    private func addItem(_ title: String, _ action: Selector?, key: String = "", on: Bool = false, enabled: Bool = true, to menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = []
+        item.target = self
+        item.state = on ? .on : .off
+        item.isEnabled = enabled
+        menu.addItem(item)
+        return item
+    }
 
-        @discardableResult
-        func add(_ title: String, _ action: Selector?, key: String = "", on: Bool = false, enabled: Bool = true, to m: NSMenu? = nil) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = []
-            item.target = self
-            item.state = on ? .on : .off
-            item.isEnabled = enabled
-            (m ?? menu).addItem(item)
-            return item
-        }
-        func submenu(_ title: String, _ build: (NSMenu) -> Void) {
-            let sub = NSMenu(title: title)
-            build(sub)
-            let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            parent.submenu = sub
-            menu.addItem(parent)
-        }
-
-        let menuOpen = cardMenu.isOpen
-        add(menuOpen ? tr("隐藏设置", "Hide Settings") : tr("显示设置", "Show Settings"), #selector(toggleMenu(_:)), key: "p", enabled: pipeline.isStreaming || !menuOpen)
-        let fs = add(isBorderlessFullscreen ? tr("退出全屏", "Exit Fullscreen") : tr("全屏", "Fullscreen"), #selector(uiToggleFullscreen(_:)), key: "f")
-        fs.keyEquivalentModifierMask = [.command]
-        add(runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速…", "Benchmark…"), #selector(menuRunBenchmark(_:)), key: "b",
-            enabled: !runningBenchmark && !installingHelper)
-        menu.addItem(.separator())
-
-        let header = NSMenuItem(title: tr("补帧", "Interpolation"), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        let curMode = pipeline.mode
+    private func fillInterpolationMenu(_ menu: NSMenu) {
+        let cur = pipeline.mode
         for m in [Mode.pass, .rifeFast, .rifeMedium, .rifeBalanced] {
-            add(m.title, #selector(menuSelectMode(_:)), key: String(m.rawValue), on: curMode == m).tag = m.rawValue
+            addItem(m.title, #selector(menuSelectMode(_:)), key: String(m.key), on: cur == m, to: menu).tag = m.rawValue
         }
         menu.addItem(.separator())
+        addItem(runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速…", "Benchmark…"), #selector(menuRunBenchmark(_:)), key: "b",
+                enabled: !runningBenchmark && !installingHelper, to: menu)
+    }
 
+    private func fillPictureMenu(_ menu: NSMenu) {
+        menu.addItem(.sectionHeader(title: tr("分辨率", "Resolution")))
         let curMW = pipeline.currentMaxWidth
-        submenu(tr("分辨率", "Resolution")) { sub in
-            for (label, mw) in [("4K", 0), ("2K", 2560), ("1080p", 1920)] {
-                let on = curMW == mw || (mw == 2560 && curMW > 1920 && curMW < 3840) || (mw == 1920 && curMW > 0 && curMW <= 1920)
-                add(label, #selector(menuSelectMaxWidth(_:)), on: on, to: sub).tag = mw
-            }
+        for (label, mw) in [("4K", 0), ("2K", 2560), ("1080p", 1920)] {
+            let on = curMW == mw || (mw == 2560 && curMW > 1920 && curMW < 3840) || (mw == 1920 && curMW > 0 && curMW <= 1920)
+            addItem(label, #selector(menuSelectMaxWidth(_:)), on: on, to: menu).tag = mw
         }
-        add("MetalFX", #selector(menuToggleUpscale(_:)), key: "x", on: pipeline.upscaler.mode == .metalfx)
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: tr("锐化", "Sharpen")))
         let curSharp = pipeline.currentSharpness
-        submenu(tr("锐化", "Sharpen")) { sub in
-            for (label, val) in [(tr("关", "Off"), Float(0.0)), (tr("标准", "Normal"), 0.55), (tr("强", "Strong"), 0.90)] {
-                add(label, #selector(menuSelectSharpness(_:)), on: abs(curSharp - val) < 0.12, to: sub).representedObject = NSNumber(value: val)
-            }
-        }
-        let curScrID = activeScreen.map { displayID($0) } ?? 0
-        submenu(tr("屏幕", "Display")) { sub in
-            for s in NSScreen.screens {
-                let title = "\(s.localizedName) (\(Int(s.frame.width * s.backingScaleFactor))×\(Int(s.frame.height * s.backingScaleFactor)))"
-                add(title, #selector(menuSelectScreen(_:)), on: displayID(s) == curScrID, to: sub).representedObject = s
-            }
+        for (label, val) in [(tr("关", "Off"), Float(0.0)), (tr("标准", "Normal"), 0.55), (tr("强", "Strong"), 0.90)] {
+            addItem(label, #selector(menuSelectSharpness(_:)), on: abs(curSharp - val) < 0.12, to: menu).representedObject = NSNumber(value: val)
         }
         menu.addItem(.separator())
+        addItem("MetalFX", #selector(menuToggleUpscale(_:)), key: "x", on: pipeline.upscaler.mode == .metalfx, to: menu)
+        addItem(tr("状态条", "Stats"), #selector(menuToggleHud(_:)), key: "h", on: hudPinned, to: menu)
+    }
 
+    private func fillInputMenu(_ menu: NSMenu) {
         let curDevPref = pipeline.currentDevicePref
-        submenu(tr("输入", "Input")) { sub in
-            add(tr("自动", "Auto"), #selector(menuSelectDevice(_:)), on: curDevPref.isEmpty, to: sub).representedObject = ""
-            let devs = videoDevices()
-            if !devs.isEmpty { sub.addItem(.separator()) }
-            for d in devs {
-                let on = !curDevPref.isEmpty && d.localizedName.localizedCaseInsensitiveContains(curDevPref)
-                add(d.localizedName, #selector(menuSelectDevice(_:)), on: on, to: sub).representedObject = d.localizedName
-            }
+        addItem(tr("自动", "Auto"), #selector(menuSelectDevice(_:)), on: curDevPref.isEmpty, to: menu).representedObject = ""
+        for d in videoDevices() {
+            let on = !curDevPref.isEmpty && d.localizedName.localizedCaseInsensitiveContains(curDevPref)
+            addItem(d.localizedName, #selector(menuSelectDevice(_:)), on: on, to: menu).representedObject = d.localizedName
         }
-        add(tr("USB 直读", "Raw USB"), #selector(menuToggleRawUSB(_:)), key: "u", on: pipeline.usingRawUSB)
+        menu.addItem(.separator())
+        addItem(tr("USB 直读", "Raw USB"), #selector(menuToggleRawUSB(_:)), key: "u", on: pipeline.usingRawUSB, to: menu)
         let helperInstalled = RawUVCCapture.verifyHelperBinary(RawUVCCapture.installedHelperPath).ok
-        add(helperInstalled ? tr("重装直读组件…", "Reinstall USB Helper…") : tr("安装直读组件…", "Install USB Helper…"),
-            #selector(menuInstallHelper(_:)), enabled: !installingHelper)
-        menu.addItem(.separator())
+        addItem(helperInstalled ? tr("重装直读组件…", "Reinstall USB Helper…") : tr("安装直读组件…", "Install USB Helper…"),
+                #selector(menuInstallHelper(_:)), enabled: !installingHelper, to: menu)
+    }
 
+    private func fillAudioMenu(_ menu: NSMenu) {
         let audOn = pipeline.isAudioEnabled
-        add(tr("声音", "Audio"), #selector(menuToggleAudio(_:)), on: audOn)
+        addItem(tr("播放声音", "Play Audio"), #selector(menuToggleAudio(_:)), on: audOn, to: menu)
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: tr("音量", "Volume")))
         let curGain = pipeline.currentAudioGainDb
-        submenu(tr("音量", "Volume")) { sub in
-            for db in [0.0, 12.0, 20.0, 26.0] {
-                let label = "+\(Int(db)) dB" + (db == 20 ? tr("（默认）", " (default)") : "")
-                add(label, #selector(menuSelectAudioGain(_:)), on: audOn && abs(curGain - db) < 1.5, to: sub).representedObject = NSNumber(value: db)
-            }
+        for db in [0.0, 12.0, 20.0, 26.0] {
+            let label = "+\(Int(db)) dB" + (db == 20 ? tr("（默认）", " (default)") : "")
+            addItem(label, #selector(menuSelectAudioGain(_:)), on: audOn && abs(curGain - db) < 1.5, enabled: audOn, to: menu).representedObject = NSNumber(value: db)
         }
-        menu.addItem(.separator())
+    }
 
-        add(tr("状态条", "Stats"), #selector(menuToggleHud(_:)), key: "h", on: hudPinned)
-        add(tr("保存最近 1 秒画面", "Save Last Second"), #selector(menuSaveSample(_:)), key: "s")
-        add(tr("显示日志", "Show Log"), #selector(menuRevealLog(_:)))
-        submenu(tr("语言", "Language")) { sub in
-            for l in Lang.allCases {
-                add(l.name, #selector(menuSelectLanguage(_:)), on: l == Lang.current, to: sub).representedObject = l.rawValue
-            }
-        }
+    private func fillViewMenu(_ menu: NSMenu) {
+        let open = cardMenu.isOpen
+        addItem(open ? tr("隐藏设置", "Hide Settings") : tr("显示设置", "Show Settings"), #selector(toggleMenu(_:)), key: "p",
+                enabled: pipeline.isStreaming || !open, to: menu)
+        addItem(isBorderlessFullscreen ? tr("退出全屏", "Exit Fullscreen") : tr("全屏", "Fullscreen"), #selector(uiToggleFullscreen(_:)), key: "f", to: menu)
+            .keyEquivalentModifierMask = [.command]
         menu.addItem(.separator())
-        add(tr("退出", "Quit"), #selector(menuQuit(_:)), key: "q")
+        menu.addItem(.sectionHeader(title: tr("屏幕", "Display")))
+        let curScrID = activeScreen.map { displayID($0) } ?? 0
+        for s in NSScreen.screens {
+            let title = "\(s.localizedName) (\(Int(s.frame.width * s.backingScaleFactor))×\(Int(s.frame.height * s.backingScaleFactor)))"
+            addItem(title, #selector(menuSelectScreen(_:)), on: displayID(s) == curScrID, to: menu).representedObject = s
+        }
+    }
+
+    private func fillHelpMenu(_ menu: NSMenu) {
+        addItem(tr("保存最近 1 秒画面", "Save Last Second"), #selector(menuSaveSample(_:)), key: "s", to: menu)
+        addItem(tr("显示日志", "Show Log"), #selector(menuRevealLog(_:)), to: menu)
     }
 
     @objc private func menuToggleUpscale(_ sender: NSMenuItem) {
@@ -5366,7 +5382,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
             }
             let key = (e.charactersIgnoringModifiers ?? "").lowercased()
-            if let digit = Int(key), let m = Mode(rawValue: digit) {
+            if let digit = Int(key), Mode.byKey.indices.contains(digit - 1) {
+                let m = Mode.byKey[digit - 1]
                 self.pipeline.setMode(m)
                 self.cardMenu.reload()
                 return nil
@@ -5426,6 +5443,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
+// AppKit would add its own "Enter Full Screen" and tab items to the View menu; Macap has its own fullscreen.
+UserDefaults.standard.register(defaults: ["NSFullScreenMenuItemEverywhere": false])
+NSWindow.allowsAutomaticWindowTabbing = false
 app.setActivationPolicy(ProcessInfo.processInfo.environment["CI_HEADLESS"] == "1" ? .prohibited : .regular)
 if let icon = Bundle.main.image(forResource: "AppIcon") { app.applicationIconImage = icon }   // Dock shows the icon even when Launch Services still caches an older build
 app.run()
