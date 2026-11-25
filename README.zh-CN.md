@@ -8,6 +8,15 @@
 
 https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
 
+## 下载安装
+
+1. 从 [Releases](https://github.com/M2cha4l/Macap/releases) 下载 `Macap-v1.0.0-macOS-arm64.dmg`，打开后把 Macap.app 拖进「应用程序」。
+2. 打开 Macap。Macap 没有经过 Apple 公证，所以 macOS 第一次会提示无法验证开发者。点「完成」，打开 系统设置 › 隐私与安全性，滚到「安全性」，点「仍要打开」并确认。只需要做一次。
+3. 允许摄像头和麦克风权限。
+4. 按 `B` 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置，可以直接应用。
+
+![Macap 设置界面](docs/settings-zh.jpg)
+
 ## 准备
 
 1. Mac：Apple Silicon（M1 到 M5），macOS 14 或更新。
@@ -20,13 +29,6 @@ https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
    - 4K 或 2K：选支持 NV12 无压缩的 USB 3.0（5 Gbps）或 USB 3.2（10 Gbps）卡。
    - 1080p：普通 USB 3.0 1080p60 卡即可。
 4. 接线：PS5 → 采集卡 HDMI IN；采集卡 USB-C → Mac（直插，不经过扩展坞）；Mac HDMI → 电视或显示器。
-
-## 安装
-
-1. 从 [Releases](https://github.com/M2cha4l/Macap/releases) 下载 `Macap-v1.0.0-macOS-arm64.dmg`，打开后把 Macap.app 拖进「应用程序」。
-2. 打开 Macap。Macap 没有经过 Apple 公证，所以 macOS 第一次会提示无法验证开发者。点「完成」，打开 系统设置 › 隐私与安全性，滚到「安全性」，点「仍要打开」并确认。只需要做一次。
-3. 允许摄像头和麦克风权限。
-4. 按 `B` 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置，可以直接应用。
 
 ## 补帧档位
 

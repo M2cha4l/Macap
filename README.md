@@ -8,6 +8,15 @@ Macap turns a PS5's 30 fps picture into 60 fps in real time on an Apple Silicon 
 
 https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
 
+## Download and install
+
+1. Download `Macap-v1.0.0-macOS-arm64.dmg` from [Releases](https://github.com/M2cha4l/Macap/releases), open it, and drag Macap.app to Applications.
+2. Open Macap. Macap is not notarized by Apple, so macOS first says it cannot verify the developer. Click Done, open System Settings › Privacy & Security, scroll to Security, click Open Anyway, and confirm. You do this once.
+3. Allow camera and microphone access.
+4. Press `B` to benchmark. After about 3 s, a window shows the settings this Mac can hold, and you can apply them.
+
+![Macap settings](docs/settings-en.jpg)
+
 ## What you need
 
 1. A Mac with Apple Silicon (M1 to M5) and macOS 14 or later.
@@ -20,13 +29,6 @@ https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
    - For 4K or 2K: a USB 3.0 (5 Gbps) or USB 3.2 (10 Gbps) card with uncompressed NV12.
    - For 1080p: any USB 3.0 1080p60 card.
 4. Wiring: PS5 → capture card HDMI IN; capture card USB-C → Mac (directly, not through a hub); Mac HDMI → TV or monitor.
-
-## Install
-
-1. Download `Macap-v1.0.0-macOS-arm64.dmg` from [Releases](https://github.com/M2cha4l/Macap/releases), open it, and drag Macap.app to Applications.
-2. Open Macap. Macap is not notarized by Apple, so macOS first says it cannot verify the developer. Click Done, open System Settings › Privacy & Security, scroll to Security, click Open Anyway, and confirm. You do this once.
-3. Allow camera and microphone access.
-4. Press `B` to benchmark. After about 3 s, a window shows the settings this Mac can hold, and you can apply them.
 
 ## Modes
 
