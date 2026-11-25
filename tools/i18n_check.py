@@ -36,6 +36,8 @@ if __name__ == '__main__':
         sys.exit(0)
     bad = 0
     for f in sorted(ROOT.glob('Resources/*.lproj/Localizable.strings')):
+        if f.parent.name in ('en.lproj', 'zh-Hans.lproj'):   # these texts live in main.swift
+            continue
         t = table(f)
         missing = [e for e in k if e not in t]
         stale = [e for e in t if e not in k]

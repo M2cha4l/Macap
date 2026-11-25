@@ -1,0 +1,1 @@
+/* Chinese and English text lives in main.swift. This folder tells macOS the app supports the language, so system-provided names (such as display names) use it. */

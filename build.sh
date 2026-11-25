@@ -10,6 +10,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleIdentifier</key><string>io.github.m2cha4l.macap</string>
 <key>CFBundleName</key><string>Macap</string>
 <key>CFBundleDisplayName</key><string>Macap</string>
