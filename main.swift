@@ -4500,6 +4500,73 @@ final class StatsPillView: NSView {
     }
 }
 
+/// Bottom-right "Settings  P" button. It appears while the mouse moves over the picture and fades 2 s after it stops.
+final class SettingsButtonView: NSView {
+    var onClick: (() -> Void)?
+    private let iconLayer = CALayer()
+    private let textLayer = Look.textLayer()
+    private var fadeWork: DispatchWorkItem?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layer = CALayer()
+        wantsLayer = true
+        isHidden = true
+        autoresizingMask = [.minXMargin, .maxYMargin]
+        layer?.backgroundColor = Look.pill
+        layer?.opacity = 0
+        layer?.addSublayer(iconLayer)
+        layer?.addSublayer(textLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    func reveal() {
+        guard let host = superview else { return }
+        let s = Look.scale(host.bounds.height), px = window?.backingScaleFactor ?? 2
+        let t = Look.text(tr("设置", "Settings") + "   P", size: 14 * s, weight: .medium, color: Look.white)
+        let sz = Look.measure(t), glyph = 16 * s
+        let h = max(sz.height, glyph) + 16 * s, w = 14 * s + glyph + 8 * s + sz.width + 16 * s
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = NSRect(x: host.bounds.width - 28 * s - w, y: 24 * s, width: w, height: h)
+        layer?.cornerRadius = h / 2
+        iconLayer.contents = Look.symbol("gearshape", box: glyph, scale: px)
+        iconLayer.frame = CGRect(x: 14 * s, y: (h - glyph) / 2, width: glyph, height: glyph)
+        textLayer.string = t
+        textLayer.contentsScale = px
+        textLayer.frame = CGRect(x: 14 * s + glyph + 8 * s, y: (h - sz.height) / 2, width: sz.width + 1, height: sz.height)
+        CATransaction.commit()
+        isHidden = false
+        fade(to: 1, duration: 0.15)
+        fadeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.conceal(hideCursor: true) }
+        fadeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
+    /// `hideCursor`: the mouse went idle over the picture, so the pointer goes too until it moves again.
+    func conceal(hideCursor: Bool = false) {
+        fadeWork?.cancel()
+        guard !isHidden else { return }
+        fade(to: 0, duration: hideCursor ? 0.4 : 0) { [weak self] in
+            guard let self, self.layer?.opacity == 0 else { return }
+            self.isHidden = true
+            if hideCursor { NSCursor.setHiddenUntilMouseMoves(true) }
+        }
+    }
+
+    private func fade(to value: Float, duration: CFTimeInterval, done: (() -> Void)? = nil) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setCompletionBlock(done)
+        layer?.opacity = value
+        CATransaction.commit()
+    }
+}
+
 // MARK: - App
 
 /// A borderless window does not take key presses unless it says it can.
@@ -4533,6 +4600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var displayLink: CADisplayLink?
     let toast = ToastView(frame: .zero)
     let statsPill = StatsPillView(frame: .zero)
+    let settingsButton = SettingsButtonView(frame: .zero)
     private var liveStats: String?
     var hudPinned = Prefs.loadHudPinned()
     var installingHelper = false
@@ -4844,6 +4912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         cardMenu.stats = streaming ? (liveStats ?? tr("已连接 · ", "Connected · ") + pipeline.currentSourceSize) : tr("未检测到采集卡", "No capture card")
         cardMenu.setOpen(!streaming || menuOverVideo)
         cardMenu.reload()
+        if cardMenu.isOpen { settingsButton.conceal() }
         updateStatsPill()
     }
 
@@ -5336,7 +5405,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         cardMenu.items = makeMenuItems()
         view.addSubview(cardMenu)
         view.addSubview(statsPill)
+        view.addSubview(settingsButton)
         view.addSubview(toast)
+        settingsButton.onClick = { [weak self] in
+            guard let self else { return }
+            self.settingsButton.conceal()
+            if self.pipeline.isStreaming && !self.menuOverVideo { self.toggleMenu(nil) }
+        }
+        window.acceptsMouseMovedEvents = true
+        NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] e in
+            if let self, e.window === self.window, self.pipeline.isStreaming, !self.cardMenu.isOpen { self.settingsButton.reveal() }
+            return e
+        }
 
         if opts.fullscreen {
             setBorderlessFullscreen(true)
@@ -5348,7 +5428,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         pipeline.onStreamStateChange = { [weak self] active in
             guard let self else { return }
-            if active && !self.streamActive { self.menuOverVideo = false }
+            if active && !self.streamActive {
+                self.menuOverVideo = false
+                self.showStatus(tr("按 P 打开设置", "Press P for settings") + "\u{3000}\u{3000}" + tr("动一下鼠标也能看到设置按钮", "Or move the mouse to show the Settings button"), force: true)
+            }
             if !active { self.liveStats = nil }
             self.streamActive = active
             self.updateMenuVisibility()
