@@ -94,6 +94,13 @@ You need the Xcode Command Line Tools. Shaders compile at run time, so Xcode its
 - When the camera turns fast and far, character edges sometimes show a faint outline.
 - A background task that fills the GPU (a local LLM, rendering) makes frames late and drops them.
 
+## Support Macap
+
+Macap is free and open source. If it helps you, you can buy me a coffee:
+
+- [Ko-fi](https://ko-fi.com/m2cha4l) (card, PayPal)
+- [爱发电 Afdian](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00) (WeChat Pay, Alipay)
+
 ## Credits
 
 Macap is built on CaptureInterp v1.0.0 by GD古仔 (MIT). Capture, frame scheduling and raw USB reading come from CaptureInterp; the interface, the modes, the languages and several fixes are new in Macap.

@@ -94,6 +94,13 @@ M5 Max（40 核显卡）实测，每帧耗时：
 - 镜头快速大幅转动时，人物边缘偶尔有半透明轮廓。
 - 后台有占满显卡的任务（本地大模型、渲染）时，补帧会超时掉帧。
 
+## 支持 Macap
+
+Macap 免费开源。如果它对你有用，欢迎请我喝杯咖啡：
+
+- [爱发电](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00)（微信、支付宝）
+- [Ko-fi](https://ko-fi.com/m2cha4l)（信用卡、PayPal）
+
 ## 致谢
 
 Macap 基于 GD古仔 的 CaptureInterp v1.0.0 开发（MIT 许可）。采集、补帧调度和 USB 直读来自 CaptureInterp；界面、档位、多语言和多项修复是 Macap 新加的。
