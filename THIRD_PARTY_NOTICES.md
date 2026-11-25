@@ -1,5 +1,7 @@
 # Third-party notices
 
+The MIT license in `LICENSE` covers main.swift, build.sh, Package.swift, tools/, Resources/ and the documentation in the repository root. ThirdParty/RifeMetal carries its own licenses, listed below.
+
 Macap's own code is MIT-licensed (see `LICENSE`). The directory `ThirdParty/RifeMetal` is not
 Macap's work. It is redistributed unchanged from the form in which OpenDuckFrame prepares it.
 

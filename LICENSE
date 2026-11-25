@@ -20,6 +20,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-This license covers main.swift, build.sh, Package.swift, tools/ and the documentation in the repository root.
-ThirdParty/RifeMetal carries its own licenses; see THIRD_PARTY_NOTICES.md.
