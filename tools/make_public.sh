@@ -2,7 +2,7 @@
 # Assemble the clean public source tree (no development history, no machine-specific paths).
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="${1:-$SRC/../Maccap-public}"
+OUT="${1:-$SRC/../Macap-public}"
 RIFE="${RIFE_RUNTIME:-$HOME/Developer/OpenDuckFrame/ThirdParty/rife-metal/runtime}"
 
 rm -rf "$OUT"

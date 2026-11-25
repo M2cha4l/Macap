@@ -1,19 +1,19 @@
 #!/bin/zsh
-# Build standalone Maccap.app next to this script (macOS 14.0+ Apple Silicon).
+# Build standalone Macap.app next to this script (macOS 14.0+ Apple Silicon).
 # Resource bundles and the prebuilt 10G UVC helper are embedded inside Contents/Resources,
-# so Maccap.app can be moved to /Applications or packaged into a .dmg without .build.
+# so Macap.app can be moved to /Applications or packaged into a .dmg without .build.
 set -euo pipefail
 cd "$(dirname "$0")"
-APP=Maccap.app
+APP=Macap.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/helper"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>io.captureinterp.app</string>
-<key>CFBundleName</key><string>Maccap</string>
-<key>CFBundleDisplayName</key><string>Maccap</string>
-<key>CFBundleExecutable</key><string>Maccap</string>
+<key>CFBundleIdentifier</key><string>io.github.m2cha4l.macap</string>
+<key>CFBundleName</key><string>Macap</string>
+<key>CFBundleDisplayName</key><string>Macap</string>
+<key>CFBundleExecutable</key><string>Macap</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0.0</string>
@@ -26,25 +26,25 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 swift build -c release
-rm -f "$APP/Contents/MacOS/Maccap" "$APP/Contents/MacOS/captureinterp-uvc-helper"
-cp .build/release/Maccap "$APP/Contents/MacOS/Maccap"
+rm -f "$APP/Contents/MacOS/Macap" "$APP/Contents/MacOS/macap-uvc-helper"
+cp .build/release/Macap "$APP/Contents/MacOS/Macap"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 if [[ -f tools/uvc_bulk_helper.c ]]; then
     clang -O2 -mmacosx-version-min=14.0 -Wall -Wextra -Werror tools/uvc_bulk_helper.c \
         -framework IOKit -framework IOSurface -framework CoreFoundation \
-        -o "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
+        -o "$APP/Contents/Resources/helper/macap-uvc-helper"
     cp tools/install_uvc_helper.sh "$APP/Contents/Resources/helper/install_uvc_helper.sh"
-    chmod 0755 "$APP/Contents/Resources/helper/captureinterp-uvc-helper" "$APP/Contents/Resources/helper/install_uvc_helper.sh"
+    chmod 0755 "$APP/Contents/Resources/helper/macap-uvc-helper" "$APP/Contents/Resources/helper/install_uvc_helper.sh"
 fi
 
 find "$APP/Contents/Resources" -maxdepth 1 -name '*.bundle' -exec rm -rf {} +
 cp -R .build/release/*.bundle "$APP/Contents/Resources/"
 
 if [[ "${CLEAN_DIST_BUILD:-0}" == "1" ]]; then
-    strip -x "$APP/Contents/MacOS/Maccap"
-    if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
-        strip -x "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
+    strip -x "$APP/Contents/MacOS/Macap"
+    if [[ -f "$APP/Contents/Resources/helper/macap-uvc-helper" ]]; then
+        strip -x "$APP/Contents/Resources/helper/macap-uvc-helper"
     fi
 fi
 
@@ -53,13 +53,13 @@ fi
 if [[ "${CLEAN_DIST_BUILD:-0}" == "1" ]]; then
     DEV_ID=$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/{print $2; exit}')
     if [[ -n "$DEV_ID" ]]; then
-        if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
-            codesign --force --options runtime --timestamp --sign "$DEV_ID" "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
+        if [[ -f "$APP/Contents/Resources/helper/macap-uvc-helper" ]]; then
+            codesign --force --options runtime --timestamp --sign "$DEV_ID" "$APP/Contents/Resources/helper/macap-uvc-helper"
         fi
         codesign --force --options runtime --timestamp --sign "$DEV_ID" "$APP"
     else
-        if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
-            codesign --force --sign - --timestamp=none "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
+        if [[ -f "$APP/Contents/Resources/helper/macap-uvc-helper" ]]; then
+            codesign --force --sign - --timestamp=none "$APP/Contents/Resources/helper/macap-uvc-helper"
         fi
         codesign --force --sign - --timestamp=none "$APP"
     fi
@@ -69,9 +69,9 @@ else
     # An ad-hoc signature identifies the app by its hash, which changes on every build, so macOS asks for
     # camera and microphone again. Name the bundle id as the requirement so a rebuild keeps the permission.
     REQ=()
-    [[ "$SIGN_ID" == "-" ]] && REQ=(--requirements '=designated => identifier "io.captureinterp.app"')
-    if [[ -f "$APP/Contents/Resources/helper/captureinterp-uvc-helper" ]]; then
-        codesign --force --sign "$SIGN_ID" --timestamp=none "$APP/Contents/Resources/helper/captureinterp-uvc-helper"
+    [[ "$SIGN_ID" == "-" ]] && REQ=(--requirements '=designated => identifier "io.github.m2cha4l.macap"')
+    if [[ -f "$APP/Contents/Resources/helper/macap-uvc-helper" ]]; then
+        codesign --force --sign "$SIGN_ID" --timestamp=none "$APP/Contents/Resources/helper/macap-uvc-helper"
     fi
     codesign --force --sign "$SIGN_ID" --timestamp=none ${REQ[@]+"${REQ[@]}"} "$APP"
 fi

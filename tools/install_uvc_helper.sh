@@ -1,7 +1,7 @@
 #!/bin/zsh
-# Install (or build + install) the root-owned UVC Bulk helper to /usr/local/libexec/captureinterp-uvc-helper
+# Install (or build + install) the root-owned UVC Bulk helper to /usr/local/libexec/macap-uvc-helper
 # with a narrow sudoers NOPASSWD entry limited to that exact binary and its whitelisted flags.
-# Works both from a downloaded Maccap.app (using the prebuilt helper in Contents/Resources/helper,
+# Works both from a downloaded Macap.app (using the prebuilt helper in Contents/Resources/helper,
 # requiring NO Xcode / Command Line Tools) and from a source checkout (compiling tools/uvc_bulk_helper.c).
 #
 # Usage:
@@ -12,10 +12,10 @@
 set -euo pipefail
 
 DEST_DIR="/usr/local/libexec"
-DEST_BIN="$DEST_DIR/captureinterp-uvc-helper"
-SUDOERS_FILE="/etc/sudoers.d/captureinterp-uvc-helper"
+DEST_BIN="$DEST_DIR/macap-uvc-helper"
+SUDOERS_FILE="/etc/sudoers.d/macap-uvc-helper"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PREBUILT_BIN="$SCRIPT_DIR/captureinterp-uvc-helper"
+PREBUILT_BIN="$SCRIPT_DIR/macap-uvc-helper"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_C="$SRC_DIR/tools/uvc_bulk_helper.c"
 if [[ ! -f "$SRC_C" && -f "$SCRIPT_DIR/uvc_bulk_helper.c" ]]; then
@@ -72,8 +72,8 @@ if [[ -z "$TARGET_UID" || "$TARGET_UID" == "0" ]]; then
     exit 1
 fi
 
-TMP_BIN="$(/usr/bin/mktemp /tmp/captureinterp-uvc-helper.XXXXXX)"
-TMP_SUDOERS="$(/usr/bin/mktemp /tmp/captureinterp-sudoers.XXXXXX)"
+TMP_BIN="$(/usr/bin/mktemp /tmp/macap-uvc-helper.XXXXXX)"
+TMP_SUDOERS="$(/usr/bin/mktemp /tmp/macap-sudoers.XXXXXX)"
 trap 'rm -f "$TMP_BIN" "$TMP_SUDOERS"' EXIT
 
 if [[ -x "$PREBUILT_BIN" && "${FORCE_BUILD_HELPER:-0}" != "1" ]]; then
@@ -115,7 +115,7 @@ done
 /usr/bin/codesign --force --sign - --timestamp=none "$DEST_BIN" >/dev/null 2>&1 || true
 
 cat > "$TMP_SUDOERS" <<EOF
-# Allow Maccap desktop user to invoke ONLY the root-owned UVC Bulk helper with fixed flags.
+# Allow Macap desktop user to invoke ONLY the root-owned UVC Bulk helper with fixed flags.
 Defaults!$DEST_BIN env_reset, !setenv
 $TARGET_USER ALL=(root) NOPASSWD: $DEST_BIN "", $DEST_BIN --recover, $DEST_BIN --mode 4k60, $DEST_BIN --mode 4k30, $DEST_BIN --mode 2k60, $DEST_BIN --mode 1080p60
 EOF

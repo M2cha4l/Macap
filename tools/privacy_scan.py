@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pre-release privacy & cleanliness scanner for CaptureInterp deliverables.
+Pre-release privacy & cleanliness scanner for Macap deliverables.
 Scans directories, .app bundles, .zip archives (recursively), and .dmg disk images
 (both text files and raw Mach-O / binary strings) to block any leak of:
   - Hardcoded user home paths (/Users/<username>)
@@ -193,7 +193,7 @@ def run_selftest() -> int:
         # 2. Clean tree MUST pass with zero findings
         clean = root / "clean_pkg"
         clean.mkdir()
-        (clean / "README.md").write_text("# CaptureInterp\nShared path example: /Users/Shared/CaptureInterp\n", encoding="utf-8")
+        (clean / "README.md").write_text("# Macap\nShared path example: /Users/Shared/Macap\n", encoding="utf-8")
         (clean / "weights.rmw").write_bytes(b"\x00\x01\x02\x03RIFE425\x00" * 128)
         clean_z = clean / "archive.zip"
         with zipfile.ZipFile(clean_z, "w") as zf:
@@ -210,7 +210,7 @@ def run_selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Pre-release privacy scanner for CaptureInterp.")
+    ap = argparse.ArgumentParser(description="Pre-release privacy scanner for Macap.")
     ap.add_argument("--selftest", action="store_true", help="Run red-then-green self-test.")
     ap.add_argument("targets", nargs="*", help="Files, directories, .app, .zip, or .dmg to scan.")
     args = ap.parse_args()

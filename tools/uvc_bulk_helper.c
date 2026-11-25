@@ -1,4 +1,4 @@
-// Privileged single-purpose UVC Bulk reader helper for CaptureInterp.
+// Privileged single-purpose UVC Bulk reader helper for Macap.
 //
 // Security properties:
 //   1. Links ONLY SIP-protected macOS system frameworks (IOKit, IOSurface, CoreFoundation, libSystem).
@@ -13,7 +13,7 @@
 // Build:
 //   clang -O2 -Wall -Wextra -Werror tools/uvc_bulk_helper.c \
 //     -framework IOKit -framework IOSurface -framework CoreFoundation \
-//     -o CaptureInterp.app/Contents/MacOS/captureinterp-uvc-helper
+//     -o Macap.app/Contents/MacOS/macap-uvc-helper
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOCFPlugIn.h>
@@ -522,7 +522,7 @@ static IOSurfaceRef create_nv12_surface(uint32_t width, uint32_t height) {
 
 static int send_ring_ports_to_client(helper_ctx_t *ctx, uint32_t client_pid, uint64_t nonce) {
     char svc_name[128];
-    snprintf(svc_name, sizeof(svc_name), "local.captureinterp.uvc.%u.%016llx",
+    snprintf(svc_name, sizeof(svc_name), "local.macap.uvc.%u.%016llx",
              client_pid, (unsigned long long)nonce);
 
     mach_port_t bport = MACH_PORT_NULL;

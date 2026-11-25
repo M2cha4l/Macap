@@ -1,8 +1,8 @@
-# Maccap
+# Macap
 
 用 Mac 的显卡把 PS5 的 30 帧画面实时补到 60 帧。画面从 HDMI 采集卡读入，不走网络串流，也不录屏。界面支持中文和英文。
 
-Maccap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It reads the picture from a UVC HDMI capture card. The interface is in Chinese or English.
+Macap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It reads the picture from a UVC HDMI capture card. The interface is in Chinese or English.
 
 ## 准备
 
@@ -10,7 +10,7 @@ Maccap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It read
 2. PS5 设置（设一次即可）：
    - 关闭 HDCP（系统 › HDMI）。不关会黑屏。
    - 关闭 HDR、VRR 和 120Hz 输出。
-   - 分辨率设为 2160p 或 1080p，60Hz。Maccap 可以自己把 4K 缩到 2K。
+   - 分辨率设为 2160p 或 1080p，60Hz。Macap 可以自己把 4K 缩到 2K。
    - 声音输出设为 2 声道线性 PCM。
 3. 免驱 UVC 采集卡：
    - 4K 或 2K：选支持 NV12 无压缩的 USB 3.0（5 Gbps）或 USB 3.2（10 Gbps）卡。
@@ -18,8 +18,8 @@ Maccap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It read
 
 ## 安装
 
-1. 打开 `.dmg`，把 Maccap.app 拖进「应用程序」。
-2. 如果系统说无法验证开发者：按住 Control 点 Maccap.app，选「打开」。
+1. 打开 `.dmg`，把 Macap.app 拖进「应用程序」。
+2. 如果系统说无法验证开发者：按住 Control 点 Macap.app，选「打开」。
 3. 允许摄像头和麦克风权限。
 4. 按 `B` 测速。约 3 秒后弹窗给出这台 Mac 能稳定运行的设置，可以直接应用。
 
@@ -78,7 +78,7 @@ M5 Max（40 核显卡）实测，每帧耗时：
 需要 Xcode 命令行工具。着色器在运行时编译，不需要 Xcode。
 
 ```sh
-./build.sh                  # 构建 Maccap.app
+./build.sh                  # 构建 Macap.app
 ./tools/package_dmg.sh      # 干净构建、自检、打包 .dmg
 ```
 
@@ -90,9 +90,9 @@ M5 Max（40 核显卡）实测，每帧耗时：
 
 ## 致谢
 
-Maccap 基于 GD古仔 的 CaptureInterp v1.0.0 开发（MIT 许可）。采集、补帧调度和 USB 直读来自 CaptureInterp；界面、档位、中英切换和多项修复是 Maccap 新加的。
+Macap 基于 GD古仔 的 CaptureInterp v1.0.0 开发（MIT 许可）。采集、补帧调度和 USB 直读来自 CaptureInterp；界面、档位、中英切换和多项修复是 Macap 新加的。
 
-Maccap is built on CaptureInterp v1.0.0 by GD古仔 (MIT).
+Macap is built on CaptureInterp v1.0.0 by GD古仔 (MIT).
 
 ## 许可
 

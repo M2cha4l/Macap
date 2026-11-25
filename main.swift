@@ -1,10 +1,10 @@
 import Accelerate
-// Maccap: capture device (UVC capture card / camera) -> Apple low-latency
+// Macap: capture device (UVC capture card / camera) -> Apple low-latency
 // frame interpolation (X2) -> fixed-cadence presentation. No screen capture.
 //
 // Usage (inside the .app bundle):
-//   Maccap --list
-//   Maccap [--device <name substring>] [--screen <index>] [--offset <ms>]
+//   Macap --list
+//   Macap [--device <name substring>] [--screen <index>] [--offset <ms>]
 //                 [--no-interp] [--audio <name substring>] [--log <path>] [--seconds <n>]
 import AppKit
 import AVFoundation
@@ -47,11 +47,11 @@ struct Options {
     var dump = ""            // directory: write a few consecutive original/generated frames as PNG (diagnosis)
     var dumpAfter = 150      // frames to wait before dumping
     var collect = true       // background sample collector: auto-saves tricky motion clips + key S saves last ~1 s
-    var sampleDir = NSHomeDirectory() + "/Library/Application Support/CaptureInterp/samples"
+    var sampleDir = NSHomeDirectory() + "/Library/Application Support/Macap/samples"
     var rife = ""            // "fast" / "medium" / "balanced": start in the GPU (RIFE) mode
     var audio = ""
     var audioExplicit = false
-    var log = NSHomeDirectory() + "/Library/Logs/CaptureInterp/stats.log"
+    var log = NSHomeDirectory() + "/Library/Logs/Macap/stats.log"
     var seconds = 0.0
     var maxWidth = 0         // 0 = highest available
     var maxWidthExplicit = false
@@ -100,6 +100,14 @@ enum Prefs {
     static func saveAudioGainDb(_ db: Double) { guard enabled else { return }; ud.set(db, forKey: "pref.audioGainDb") }
     static func saveHudPinned(_ on: Bool) { guard enabled else { return }; ud.set(on, forKey: "pref.hudPinned") }
     static func loadHudPinned() -> Bool { enabled ? ud.bool(forKey: "pref.hudPinned") : false }
+    /// The app was called CaptureInterp and then Maccap, both under the bundle id io.captureinterp.app.
+    /// Copy its saved settings once so the rename does not reset them.
+    static func migrateOldSettings() {
+        guard enabled, !ud.bool(forKey: "pref.migrated"),
+              let old = ud.persistentDomain(forName: "io.captureinterp.app") else { return }
+        for (k, v) in old where k.hasPrefix("pref.") && ud.object(forKey: k) == nil { ud.set(v, forKey: k) }
+        ud.set(true, forKey: "pref.migrated")
+    }
     static func saveLanguage(_ l: Lang) { guard enabled else { return }; ud.set(l.rawValue, forKey: "pref.language") }
     static func loadLanguage() -> Lang? { enabled ? ud.string(forKey: "pref.language").flatMap(Lang.init) : nil }
 }
@@ -212,6 +220,7 @@ func parseOptions() -> Options {
     return o
 }
 
+Prefs.migrateOldSettings()
 let opts = parseOptions()
 
 let noDisplayDebug = ProcessInfo.processInfo.environment["CI_NO_DISPLAY"] == "1"
@@ -1541,7 +1550,7 @@ private final class SurfaceLease {
 }
 
 final class RawUVCCapture {
-    static let installedHelperPath = "/usr/local/libexec/captureinterp-uvc-helper"
+    static let installedHelperPath = "/usr/local/libexec/macap-uvc-helper"
     static let ringSlots = 8
     private static let helloMagic: UInt32 = 0x55564348 // "UVCH"
     private static let helloFlagAudio: UInt32 = 0x00010000
@@ -1551,7 +1560,7 @@ final class RawUVCCapture {
     private static let frameMagic: UInt32 = 0x55564652 // "UVFR"
     private static let audioMagic: UInt32 = 0x55564155 // "UVAU"
     private static let portMsgID: mach_msg_id_t = 0x55565054 // "UVPT"
-    private static let leaseKey: CFString = "local.captureinterp.surface.lease" as CFString
+    private static let leaseKey: CFString = "local.macap.surface.lease" as CFString
 
     private struct RecvPortsMsg {
         var hdr: mach_msg_header_t
@@ -1772,7 +1781,7 @@ final class RawUVCCapture {
         }
 
         let nonce = UInt64.random(in: 1...UInt64.max)
-        let svcName = String(format: "local.captureinterp.uvc.%u.%016llx", UInt32(getpid()), nonce)
+        let svcName = String(format: "local.macap.uvc.%u.%016llx", UInt32(getpid()), nonce)
         let regKr = svcName.withCString { c_bootstrap_register(bp, $0, srvPort) }
         guard regKr == KERN_SUCCESS else {
             return (false, 0, 0, 0, String(format: "bootstrap_register failed (0x%x)", regKr))
@@ -2084,7 +2093,7 @@ final class RawUVCCapture {
 
             var bp: mach_port_t = 0
             _ = task_get_special_port(mach_task_self_, TASK_BOOTSTRAP_PORT, &bp)
-            let svc = String(format: "local.captureinterp.uvc.%u.%016llx", pid, nonce)
+            let svc = String(format: "local.macap.uvc.%u.%016llx", pid, nonce)
             var dst: mach_port_t = 0
             guard svc.withCString({ c_bootstrap_look_up(bp, $0, &dst) }) == KERN_SUCCESS else { return }
 
@@ -2341,7 +2350,7 @@ final class RawUVCCapture {
             print(rep.formattedSummary())
         }
 
-        print(String(format: "Maccap selftest: PASS (ownership, Mach ring, non-propagating lease, fused-NV12 diff=%.2f, fast-fail=%.1f ms, delivery=%.2f ms)", colorDelta, fastMs, measuredDelivMs))
+        print(String(format: "Macap selftest: PASS (ownership, Mach ring, non-propagating lease, fused-NV12 diff=%.2f, fast-fail=%.1f ms, delivery=%.2f ms)", colorDelta, fastMs, measuredDelivMs))
         return true
     }
 }
@@ -4046,12 +4055,12 @@ enum Look {
            let img = NSImage(contentsOf: url)?.cgImage(forProposedRect: &rect, context: nil, hints: nil) { return img }
         let ctx = CGContext(data: nil, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        drawMaccapIcon(ctx, size: 256)
+        drawMacapIcon(ctx, size: 256)
         return ctx.makeImage()!
     }()
 
     /// Same drawing as tools/make_icon.swift (prototype SVG coordinates: viewBox 256, y down).
-    static func drawMaccapIcon(_ ctx: CGContext, size: CGFloat) {
+    static func drawMacapIcon(_ ctx: CGContext, size: CGFloat) {
         let k = size / 256
         ctx.saveGState()
         ctx.translateBy(x: 0, y: size)
@@ -4253,7 +4262,7 @@ final class CardMenuView: NSView {
     private func layoutTopBar() {
         let s = s, px = px
         iconLayer.frame = up(CGRect(x: 64 * s, y: 40 * s, width: 40 * s, height: 40 * s))
-        let name = Look.text("Maccap", size: 20 * s, weight: .light, color: Look.white)
+        let name = Look.text("Macap", size: 20 * s, weight: .light, color: Look.white)
         let nsz = Look.measure(name)
         nameLayer.string = name
         nameLayer.contentsScale = px
@@ -4601,8 +4610,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = tr("需要摄像头权限", "Camera access needed")
-        alert.informativeText = tr("macOS 把采集卡当作摄像头。请在 系统设置 › 隐私与安全性 › 摄像头 中打开 Maccap，然后重新打开 Maccap。",
-                                   "macOS treats the capture card as a camera. Turn on Maccap in System Settings › Privacy & Security › Camera, then reopen Maccap.")
+        alert.informativeText = tr("macOS 把采集卡当作摄像头。请在 系统设置 › 隐私与安全性 › 摄像头 中打开 Macap，然后重新打开 Macap。",
+                                   "macOS treats the capture card as a camera. Turn on Macap in System Settings › Privacy & Security › Camera, then reopen Macap.")
         alert.addButton(withTitle: tr("打开系统设置", "Open System Settings"))
         alert.addButton(withTitle: tr("退出", "Quit"))
         if alert.runModal() == .alertFirstButtonReturn,
@@ -4654,7 +4663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             window.collectionBehavior = [.managed]
             window.styleMask = windowedStyleMask
             window.titlebarAppearsTransparent = true
-            window.title = "Maccap"
+            window.title = "Macap"
             window.isMovableByWindowBackground = true
             let restore = savedWindowedFrame ?? defaultWindowedRect(on: screen)
             window.setFrame(restore, display: true)
@@ -4886,13 +4895,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: tr("关于 Maccap", "About Maccap"), action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: tr("关于 Macap", "About Macap"), action: #selector(orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let hideItem = NSMenuItem(title: tr("隐藏 Maccap", "Hide Maccap"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideItem = NSMenuItem(title: tr("隐藏 Macap", "Hide Macap"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hideItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(hideItem)
         appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(title: tr("退出 Maccap", "Quit Maccap"), action: #selector(menuQuit(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: tr("退出 Macap", "Quit Macap"), action: #selector(menuQuit(_:)), keyEquivalent: "q")
         quitItem.target = self
         quitItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(quitItem)
@@ -5193,8 +5202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = tr("安装 USB 直读组件", "Install USB Helper")
-        alert.informativeText = tr("用于 Realtek 0bda:0911 芯片的 10 Gbps 采集卡。macOS 驱动把每次读取切成 16 KB，4K60 会丢帧。\n\n组件装到 /usr/local/libexec/captureinterp-uvc-helper，每次读 256 KB。安装需要管理员密码。",
-                                   "For 10 Gbps capture cards with the Realtek 0bda:0911 chip. The macOS driver splits each read into 16 KB, so 4K60 drops frames.\n\nThe helper installs to /usr/local/libexec/captureinterp-uvc-helper and reads 256 KB at a time. Installing asks for an admin password.")
+        alert.informativeText = tr("用于 Realtek 0bda:0911 芯片的 10 Gbps 采集卡。macOS 驱动把每次读取切成 16 KB，4K60 会丢帧。\n\n组件装到 /usr/local/libexec/macap-uvc-helper，每次读 256 KB。安装需要管理员密码。",
+                                   "For 10 Gbps capture cards with the Realtek 0bda:0911 chip. The macOS driver splits each read into 16 KB, so 4K60 drops frames.\n\nThe helper installs to /usr/local/libexec/macap-uvc-helper and reads 256 KB at a time. Installing asks for an admin password.")
         alert.addButton(withTitle: tr("安装", "Install"))
         alert.addButton(withTitle: tr("取消", "Cancel"))
         let choice = alert.runModal()
@@ -5287,7 +5296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         window.backgroundColor = NSColor(calibratedWhite: 0.06, alpha: 1.0)
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-        window.title = "Maccap"
+        window.title = "Macap"
         window.minSize = NSSize(width: 780, height: 540)
         window.delegate = self
 

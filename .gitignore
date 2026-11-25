@@ -1,7 +1,6 @@
 .build/
 .swiftpm/
 dist/
-CaptureInterp.app/
-Maccap.app/
+Macap.app/
 *.log
 .DS_Store

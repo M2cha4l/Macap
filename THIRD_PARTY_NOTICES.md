@@ -1,7 +1,7 @@
 # Third-party notices
 
-CaptureInterp's own code is MIT-licensed (see `LICENSE`). The directory `ThirdParty/RifeMetal` is not
-CaptureInterp's work. It is redistributed unchanged from the form in which OpenDuckFrame prepares it.
+Macap's own code is MIT-licensed (see `LICENSE`). The directory `ThirdParty/RifeMetal` is not
+Macap's work. It is redistributed unchanged from the form in which OpenDuckFrame prepares it.
 
 ## rife-metal
 
@@ -17,7 +17,7 @@ CaptureInterp's work. It is redistributed unchanged from the form in which OpenD
 - Changes carried here: the stream I/O patch, the experiment-options patch, the runtime-support patch, the
   `PaddedFrameConvert` helpers, and the four-stage model derivation. Each file's origin and hash is recorded in
   `ThirdParty/RifeMetal/source-origin.json`.
-- CaptureInterp is a separate program. It is not an OpenDuckFrame release and is not endorsed by its maintainers.
+- Macap is a separate program. It is not an OpenDuckFrame release and is not endorsed by its maintainers.
 
 ## Practical-RIFE model weights
 

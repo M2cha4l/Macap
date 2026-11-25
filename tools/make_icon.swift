@@ -1,4 +1,4 @@
-// Draws the Maccap icon and writes Resources/AppIcon.icns.
+// Draws the Macap icon and writes Resources/AppIcon.icns.
 // Run from the repo root: swift tools/make_icon.swift
 import AppKit
 
