@@ -98,8 +98,9 @@ You need the Xcode Command Line Tools. Shaders compile at run time, so Xcode its
 
 Macap is free and open source. If it helps you, you can buy me a coffee:
 
-- [Ko-fi](https://ko-fi.com/m2cha4l) (card, PayPal)
-- [爱发电 Afdian](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00) (WeChat Pay, Alipay)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l) [![Afdian](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00)
+
+Ko-fi takes cards and PayPal. 爱发电 (Afdian) takes WeChat Pay and Alipay.
 
 ## Credits
 

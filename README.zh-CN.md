@@ -98,8 +98,9 @@ M5 Max（40 核显卡）实测，每帧耗时：
 
 Macap 免费开源。如果它对你有用，欢迎请我喝杯咖啡：
 
-- [爱发电](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00)（微信、支付宝）
-- [Ko-fi](https://ko-fi.com/m2cha4l)（信用卡、PayPal）
+[![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-946CE6?style=for-the-badge)](https://afdian.com/item/7710bd38e87e11f1b59e5254001e7c00) [![Ko-fi](https://img.shields.io/badge/Ko--fi-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/m2cha4l)
+
+爱发电支持微信和支付宝，Ko-fi 支持信用卡和 PayPal。
 
 ## 致谢
 
