@@ -1,7 +1,7 @@
 # Macap
 
 用 Mac 的显卡把 PS5 的 30 帧画面实时补到 60 帧。画面从 HDMI 采集卡读入，不走网络串流，也不录屏。界面支持英语、简体中文、印地语、西班牙语、阿拉伯语、法语和日语。
-
+https://github.com/user-attachments/assets/f1690237-433f-407e-ae71-cc448c58586e
 Macap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It reads the picture from a UVC HDMI capture card. The interface is in English, Simplified Chinese, Hindi, Spanish, Arabic, French or Japanese.
 
 ## 准备
