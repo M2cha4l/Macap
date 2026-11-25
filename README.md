@@ -88,6 +88,12 @@ M5 Max（40 核显卡）实测，每帧耗时：
 - 镜头快速大幅转动时，人物边缘偶尔有半透明轮廓。
 - 后台有占满显卡的任务（本地大模型、渲染）时，补帧会超时掉帧。
 
+## 致谢
+
+Maccap 基于 GD古仔 的 CaptureInterp v1.0.0 开发（MIT 许可）。采集、补帧调度和 USB 直读来自 CaptureInterp；界面、档位、中英切换和多项修复是 Maccap 新加的。
+
+Maccap is built on CaptureInterp v1.0.0 by GD古仔 (MIT).
+
 ## 许可
 
 本仓库代码采用 MIT 许可（`LICENSE`）。`ThirdParty/RifeMetal` 基于 rife-metal（Apache-2.0）、OpenDuckFrame（MIT）和 Practical-RIFE 模型权重（MIT），见 `THIRD_PARTY_NOTICES.md`。
