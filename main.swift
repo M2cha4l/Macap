@@ -113,14 +113,43 @@ enum Prefs {
 }
 
 enum Lang: String, CaseIterable {
-    case zh, en
-    var name: String { self == .zh ? "中文" : "English" }
-    /// Saved choice, else the first system language. `--lang` overrides it for one run.
-    static var current: Lang = Prefs.loadLanguage() ?? (Locale.preferredLanguages.first?.hasPrefix("zh") == true ? .zh : .en)
+    case en, zh, hi, es, ar, fr, ja
+    /// Each language names itself, so a reader can find their own in the list.
+    var name: String {
+        switch self {
+        case .en: return "English"
+        case .zh: return "简体中文"
+        case .hi: return "हिन्दी"
+        case .es: return "Español"
+        case .ar: return "العربية"
+        case .fr: return "Français"
+        case .ja: return "日本語"
+        }
+    }
+    /// Saved choice, else the first system language Macap has. `--lang` overrides it for one run.
+    static var current: Lang = Prefs.loadLanguage() ?? systemDefault
+    static var systemDefault: Lang {
+        for code in Locale.preferredLanguages { if let l = allCases.first(where: { code.hasPrefix($0.rawValue) }) { return l } }
+        return .en
+    }
+    /// Resources/<code>.lproj/Localizable.strings, keyed by the English text. Chinese and English live in the code.
+    private static var tables: [Lang: [String: String]] = [:]
+    var table: [String: String] {
+        if let t = Lang.tables[self] { return t }
+        let t = Bundle.main.path(forResource: "Localizable", ofType: "strings", inDirectory: nil, forLocalization: rawValue)
+            .flatMap { NSDictionary(contentsOfFile: $0) as? [String: String] } ?? [:]
+        Lang.tables[self] = t
+        return t
+    }
 }
 
-/// Every UI string goes through here, so both languages sit side by side at the call site.
-func tr(_ zh: String, _ en: String) -> String { Lang.current == .zh ? zh : en }
+/// Every UI string goes through here. Chinese and English sit at the call site; other languages look up the English text.
+/// With arguments, both texts are format strings (%@, %d) so translations can move the values.
+func tr(_ zh: String, _ en: String, _ args: CVarArg...) -> String {
+    let l = Lang.current
+    let s = l == .zh ? zh : (l == .en ? en : l.table[en] ?? en)
+    return args.isEmpty ? s : String(format: s, arguments: args)
+}
 
 func parseOptions() -> Options {
     var o = Options()
@@ -1189,7 +1218,7 @@ final class SampleCollector {
                 DispatchQueue.main.async { notify(tr("还没有可保存的画面", "Nothing to save yet")) }; return
             }
             guard self.manualCount < self.manualSessionLimit else {
-                DispatchQueue.main.async { notify(tr("本次最多保存 \(self.manualSessionLimit) 次", "Limit reached: \(self.manualSessionLimit) saves")) }; return
+                DispatchQueue.main.async { notify(tr("本次最多保存 %d 次", "Limit reached: %d saves", self.manualSessionLimit)) }; return
             }
             self.manualCount += 1
             let idx = self.manualCount
@@ -1241,7 +1270,7 @@ final class SampleCollector {
                 Log.shared.line(String(format: "sample saved: %@ (%d frames, %dx%d, allDiff %.1f center %.1f outer %.1f gap %.1f ms)",
                                        folderName, take, w, h, trigMeta.allDiff, trigMeta.centerDiff, trigMeta.outerDiff, trigMeta.gapMs))
                 if let notify {
-                    DispatchQueue.main.async { notify(tr("已保存最近 1 秒（\(take) 帧）", "Saved the last second (\(take) frames)")) }
+                    DispatchQueue.main.async { notify(tr("已保存最近 1 秒（%d 帧）", "Saved the last second (%d frames)", take)) }
                 }
             } catch {
                 Log.shared.line("sample save failed: \(error.localizedDescription)")
@@ -2417,7 +2446,7 @@ enum HardwareBenchmark {
                     lines.append(tr("备选：", "Alternative: ") + alt)
                 }
             } else {
-                lines.append(tr("推荐：1080p + ", "Recommended: 1080p + ") + Mode.rifeFast.title + tr("，或", ", or ") + Mode.pass.title)
+                lines.append(tr("推荐：1080p + %@，或%@", "Recommended: 1080p + %@, or %@", Mode.rifeFast.title, Mode.pass.title))
             }
             if isFanlessAir {
                 lines.append(tr("无风扇机型：长时间玩发热时，降一档分辨率。", "Fanless Mac: if it gets hot, lower the resolution one step."))
@@ -2847,7 +2876,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if foundDev != nil && self.startAVFoundation() {
                         Log.shared.line("fell back to AVFoundation after raw-usb exit")
-                        self.onStatus?(tr("USB 直读中断，改用系统采集（\(self.sourceSize)）", "Raw USB stopped. Using system capture (\(self.sourceSize))"))
+                        self.onStatus?(tr("USB 直读中断，改用系统采集（%@）", "Raw USB stopped. Using system capture (%@)", self.sourceSize))
                     } else {
                         Log.shared.line("capture card absent after raw-usb exit; prompting replug")
                         self.notifyStreamActive(false)
@@ -2884,13 +2913,13 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if r.ok {
                         self.finishActivateRawUSB(r.raw, modeName: modeName, width: r.width, height: r.height, usbSpeed: r.usbSpeed)
-                        self.onStatus?(tr("输入：USB 直读（\(self.sourceSize)）", "Input: raw USB (\(self.sourceSize))"))
+                        self.onStatus?(tr("输入：USB 直读（%@）", "Input: raw USB (%@)", self.sourceSize))
                     } else {
                         Log.shared.line("raw-usb switch failed (\(r.reason)); staying on AVFoundation")
                         self.usingRawUSB = false
                         Prefs.saveRawUSB(false)
                         if self.startAVFoundation() {
-                            self.onStatus?(tr("USB 直读未就绪，继续用系统采集（\(self.sourceSize)）", "Raw USB not ready. Staying on system capture (\(self.sourceSize))"))
+                            self.onStatus?(tr("USB 直读未就绪，继续用系统采集（%@）", "Raw USB not ready. Staying on system capture (%@)", self.sourceSize))
                         } else {
                             self.notifyStreamActive(false)
                             self.onStatus?(tr("USB 直读未就绪，未找到采集卡。等待连接…", "Raw USB not ready and no capture card found. Waiting…"))
@@ -2916,7 +2945,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 DispatchQueue.main.async {
                     self.switchingSource = false
                     if self.startAVFoundation() {
-                        self.onStatus?(tr("输入：系统采集（\(self.sourceSize)）", "Input: system capture (\(self.sourceSize))"))
+                        self.onStatus?(tr("输入：系统采集（%@）", "Input: system capture (%@)", self.sourceSize))
                     } else {
                         self.notifyStreamActive(false)
                         self.onStatus?(tr("未找到采集卡，等待连接…", "No capture card. Waiting…"))
@@ -2951,9 +2980,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.switchingSource = false
                     if r.ok {
                         self.finishActivateRawUSB(r.raw, modeName: modeName, width: r.width, height: r.height, usbSpeed: r.usbSpeed)
-                        self.onStatus?(statusPrefix + tr("（USB 直读 \(self.sourceSize)）", " (raw USB \(self.sourceSize))"))
+                        self.onStatus?(statusPrefix + tr("（USB 直读 %@）", " (raw USB %@)", self.sourceSize))
                     } else if self.startAVFoundation() {
-                        self.onStatus?(statusPrefix + tr("（系统采集 \(self.sourceSize)）", " (system capture \(self.sourceSize))"))
+                        self.onStatus?(statusPrefix + tr("（系统采集 %@）", " (system capture %@)", self.sourceSize))
                     } else {
                         self.notifyStreamActive(false)
                         self.onStatus?(tr("没有画面，等待设备…", "No picture. Waiting for the device…"))
@@ -3079,7 +3108,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             Log.shared.line("raw-usb unavailable (\(res.reason)); falling back to AVFoundation")
             usingRawUSB = false
             if startAVFoundation() {
-                DispatchQueue.main.async { self.onStatus?(tr("USB 直读未就绪，改用系统采集（\(self.sourceSize)）", "Raw USB not ready. Using system capture (\(self.sourceSize))")) }
+                DispatchQueue.main.async { self.onStatus?(tr("USB 直读未就绪，改用系统采集（%@）", "Raw USB not ready. Using system capture (%@)", self.sourceSize)) }
                 return true
             }
             notifyStreamActive(false)
@@ -3210,7 +3239,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             if wantRaw && pref.isEmpty { self.usingRawUSB = true }
             if self.start() {
                 Log.shared.line("reconnected")
-                self.onStatus?(tr("已连接（\(self.sourceSize)）", "Connected (\(self.sourceSize))"))
+                self.onStatus?(tr("已连接（%@）", "Connected (%@)", self.sourceSize))
             } else {
                 self.scheduleReconnectLoop()
             }
@@ -3934,7 +3963,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             // Scheduled hold from capture timestamp to the original's display time. Not included: delay inside the
             // capture device before the timestamp, waiting for the next display refresh, and the system compositor.
             let hold = percentile(holdMs, 0.5)
-            stats = String(format: "%.1f fps · %.0f ms · ", Double(frames + mids) / span, hold) + String(format: tr("丢帧 %d", "%d drops"), droppedMids)
+            stats = String(format: "%.1f fps · %.0f ms · ", Double(frames + mids) / span, hold) + tr("丢帧 %d", "%d drops", droppedMids)
             Log.shared.line(String(format: "src %@ in %.1f fps | out %.1f fps | mid %d late %d dropped %d fail %d | orig late %d | delivery p50 %.1f p95 %.1f ms | ready p95 %.1f ms | interp p95 %.1f ms | offset %.1f ms | hold to refresh p50 %.1f p95 %.1f ms (%@) | beyond delivery %.1f ms",
                                    sourceSize, Double(frames) / span, Double(frames + mids) / span, mids, lateMids, droppedMids, failed, lateOrig,
                                    percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(readyMs, 0.95), percentile(interpMs, 0.95),
@@ -4864,7 +4893,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                      options: { Lang.allCases.map(\.name) },
                      current: { Lang.allCases.firstIndex(of: Lang.current) ?? 0 },
                      apply: { [unowned self] i in self.setLanguage(Lang.allCases[i]) },
-                     note: { _ in "中文 / English" }),
+                     note: { _ in tr("界面语言。", "Interface language.") }),
             MenuItem(title: tr("工具", "Tools"), symbol: "wrench.and.screwdriver",
                      options: { [unowned self] in
                          [self.runningBenchmark ? tr("测速中…", "Benchmarking…") : tr("测速 (B)", "Benchmark (B)"),
@@ -4933,7 +4962,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         cardMenu.reload()
         guard !pipeline.isStreaming else { return }
         if pipeline.start() {
-            showStatus(tr("已连接（\(pipeline.currentSourceSize)）", "Connected (\(pipeline.currentSourceSize))"), force: true)
+            showStatus(tr("已连接（%@）", "Connected (%@)", pipeline.currentSourceSize), force: true)
         } else {
             showStatus(tr("未找到采集卡。检查 USB 和 HDMI。", "No capture card. Check USB and HDMI."), force: true)
         }

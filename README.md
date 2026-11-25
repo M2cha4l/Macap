@@ -1,8 +1,8 @@
 # Macap
 
-用 Mac 的显卡把 PS5 的 30 帧画面实时补到 60 帧。画面从 HDMI 采集卡读入，不走网络串流，也不录屏。界面支持中文和英文。
+用 Mac 的显卡把 PS5 的 30 帧画面实时补到 60 帧。画面从 HDMI 采集卡读入，不走网络串流，也不录屏。界面支持英语、简体中文、印地语、西班牙语、阿拉伯语、法语和日语。
 
-Macap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It reads the picture from a UVC HDMI capture card. The interface is in Chinese or English.
+Macap turns a PS5's 30 fps picture into 60 fps on an Apple Silicon Mac. It reads the picture from a UVC HDMI capture card. The interface is in English, Simplified Chinese, Hindi, Spanish, Arabic, French or Japanese.
 
 ## 准备
 
@@ -71,7 +71,7 @@ M5 Max（40 核显卡）实测，每帧耗时：
 | `Esc` | 先关菜单，再退出全屏 |
 | `Q` / `⌘Q` | 退出 |
 
-语言在菜单的「语言 / Language」里切换。
+语言在菜单栏 Macap › 语言 里切换。默认跟随系统语言。中英文以外的译文由 AI 翻译，欢迎母语用户提交修改：`Resources/<语言>.lproj/Localizable.strings`，改完运行 `tools/i18n_check.py` 检查。
 
 ## 从源码构建
 

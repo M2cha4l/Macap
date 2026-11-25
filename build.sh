@@ -29,6 +29,8 @@ swift build -c release
 rm -f "$APP/Contents/MacOS/Macap" "$APP/Contents/MacOS/macap-uvc-helper"
 cp .build/release/Macap "$APP/Contents/MacOS/Macap"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+find "$APP/Contents/Resources" -maxdepth 1 -name "*.lproj" -exec rm -rf {} +
+cp -R Resources/*.lproj "$APP/Contents/Resources/" 2>/dev/null || true
 
 if [[ -f tools/uvc_bulk_helper.c ]]; then
     clang -O2 -mmacosx-version-min=14.0 -Wall -Wextra -Werror tools/uvc_bulk_helper.c \

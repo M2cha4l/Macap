@@ -7,6 +7,6 @@ let package = Package(
     dependencies: [.package(path: "ThirdParty/RifeMetal")],
     targets: [.executableTarget(name: "Macap",
                                 dependencies: [.product(name: "RifeMetal", package: "RifeMetal")],
-                                path: ".", sources: ["main.swift"],
+                                path: ".", exclude: ["Resources"], sources: ["main.swift"],
                                 swiftSettings: [.unsafeFlags(["-swift-version", "5"])])]
 )
