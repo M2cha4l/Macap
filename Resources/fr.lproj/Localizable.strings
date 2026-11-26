@@ -59,7 +59,6 @@
 "Applied: " = "Appliqué : ";
 "The game runs at 60 fps. Passthrough on" = "Le jeu tourne à 60 fps. Mode Direct activé";
 "The game runs at 30 fps. Interpolating" = "Le jeu tourne à 30 fps. Interpolation active";
-"0 drops" = "0 perte";
 "%d drops" = "%d pertes";
 "Settings" = "Réglages";
 "Camera access needed" = "Accès à la caméra requis";
@@ -158,3 +157,4 @@
 "Install failed. Staying on system capture" = "Échec de l’installation. Capture système conservée";
 "Press P for settings" = "Appuyez sur P pour les réglages";
 "Or move the mouse to show the Settings button" = "Ou bougez la souris pour afficher le bouton Réglages";
+"%.0f Hz signal · %.0f fps new · %.0f ms" = "Signal %.0f Hz · %.0f fps nouvelles · %.0f ms";

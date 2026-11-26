@@ -3576,6 +3576,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var parityChange = [0.0, 0.0]         // recent picture change seen on even / odd capture frames
     private(set) var paritySwitches = 0
     private var noiseFloor = 0.0, sceneRef = 0.0, maxSinceKept = 99.0
+    private var newPictures = 0                    // 60 Hz signal: frames that are not a copy of the one before (under seenLock)
     private var pickGaps = [0, 0, 0, 0], samePictureAgain = 0
 
     /// Runs on the light capture queue for every delivered frame; decides whether the frame is processed.
@@ -3589,6 +3590,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             if seenGap > 60 || (seenGap < 0 && seenGap != -1) { Log.shared.line(String(format: "capture gap: %.0f ms between delivered frames", seenGap)) }
             let d = differenceFromPrevious(pb)
             let neighbour = seenGap > 5 && seenGap < 22          // previous frame really was the one before
+            // A 30 fps game on a 60 Hz signal sends each picture twice; Passthrough shows both, so count the new ones.
+            if !(neighbour && d < max(0.003, 1.6 * noiseFloor)) { seenLock.lock(); newPictures += 1; seenLock.unlock() }
             var isRepeat = false, known = false
             if neighbour {
                 recentDiffs.append(d); if recentDiffs.count > 120 { recentDiffs.removeFirst() }
@@ -3808,14 +3811,16 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         audio?.setDelay(percentile(audioHoldHistory, 0.95))
 
         var mid: CVPixelBuffer?
-        var earlyMid: CVPixelBuffer?                   // GPU mode, long gap: the 1/3 picture, one refresh before `mid`
+        var earlyMid: CVPixelBuffer?                   // GPU mode, long gap: the 1/3 picture, one 60 Hz step before `mid`
         var shown: CVPixelBuffer = pb                  // what represents this original on screen
         var work: CVPixelBuffer?
         let t0 = hostNow()
         if let rife = rifeEngines[mode] {
-            let refreshes = (consecutive && vp > 0.004) ? Int((gapMs / (vp * 1000)).rounded()) : 2
+            // Count the gap in 60 Hz capture steps, not screen refreshes. On a 120 Hz screen a normal 30 fps gap is four
+            // refreshes; that read as a held picture on every frame and put the only in-between picture at 3/4.
+            let steps = consecutive ? Int((gapMs / (1000.0 / 60.0)).rounded()) : 2
             var customSteps: [Float]? = nil
-            if (refreshes == 3 || refreshes == 4) && opts.multiMid {
+            if (steps == 3 || steps == 4) && opts.multiMid {
                 longGaps += 1
                 // Two in-between pictures must both finish before the next picture arrives (one 30 fps slot, less
                 // headroom), judged from this machine's measured time per picture. Otherwise one at 2/3 or 3/4:
@@ -3823,8 +3828,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 let perPic = perPictureMs[mode] ?? 0
                 let affordTwo = (mode == .rifeFast || mode == .rifeMedium) && perPic > 0 && 2 * perPic <= 1000.0 / 30.0 - 6.0
                 customSteps = affordTwo
-                    ? [Float(refreshes - 2) / Float(refreshes), Float(refreshes - 1) / Float(refreshes)]
-                    : [Float(refreshes - 1) / Float(refreshes)]
+                    ? [Float(steps - 2) / Float(steps), Float(steps - 1) / Float(steps)]
+                    : [Float(steps - 1) / Float(steps)]
             }
             let useGPUProtect = opts.protectStill && !opts.protectOnCPU
             sharpLock.lock(); let curCAS = casStrength; sharpLock.unlock()
@@ -3926,7 +3931,8 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             if lateBy > 8 { droppedMids += 1 }          // too late to be useful: show only the original
             else {
                 if let e = earlyMid, vp > 0.004 {
-                    let t = CMTimeSubtract(midTime, CMTime(seconds: vp, preferredTimescale: 1_000_000_000))
+                    let step = max(1, (1.0 / 60.0 / vp).rounded()) * vp      // one 60 Hz step, on this screen's refresh grid
+                    let t = CMTimeSubtract(midTime, CMTime(seconds: step, preferredTimescale: 1_000_000_000))
                     if ms(CMTimeSubtract(ready, t)) <= 2 { enqueue(e, at: t); earlyShown += 1 }      // only if it can still make its refresh
                 }
                 enqueue(mid, at: midTime); mids += 1
@@ -3956,7 +3962,9 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let srcIs60 = currentActiveSourceFps() >= 50
         var stats: String
         if passing || fastSourceNoted {
-            stats = String(format: "%.1f fps · %.0f ms · ", Double(frames) / span, percentile(procMs, 0.95)) + tr("丢帧 0", "0 drops")
+            seenLock.lock(); let fresh = srcIs60 ? newPictures : frames; newPictures = 0; seenLock.unlock()
+            stats = tr("信号 %.0f Hz · 新画面 %.0f fps · %.0f ms", "%.0f Hz signal · %.0f fps new · %.0f ms",
+                       Double(frames) / span, Double(fresh) / span, percentile(procMs, 0.95))
             Log.shared.line(String(format: "src %@ in %.1f fps | pass-through | device delivery p50 %.1f p95 %.1f ms | our processing p95 %.2f ms (arrival -> display layer; excludes vsync and compositor)",
                                    sourceSize, Double(frames) / span, percentile(deliveryMs, 0.5), percentile(deliveryMs, 0.95), percentile(procMs, 0.95)))
         } else {
@@ -3972,6 +3980,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         if srcIs60 && !opts.legacyPick { Log.shared.line("   picked half: \(pickParity), switches so far \(paritySwitches) | long gaps (50-67 ms) \(longGaps), filled with two pictures \(earlyShown) | picks so far by gap 25:\(pickGaps[0]) 33:\(pickGaps[1]) 42:\(pickGaps[2]) 50+:\(pickGaps[3]), same picture taken again \(samePictureAgain), repeat noise \(String(format: "%.3f", noiseFloor))") }
         if let r = rifeEngines[mode] { Log.shared.line(String(format: "   stages: convert %.1f engine %.1f protect %.1f ms", r.lastConvertMs, r.lastEngineMs, lastProtectMs)) }
+        if rifeEngines[mode] != nil && !srcIs60 { Log.shared.line("   long gaps (50-67 ms) so far: \(longGaps)") }
         if upscaler.mode == .metalfx {
             let u = upscaler, k = u.key
             if u.gpuMs.isEmpty { Log.shared.line("   upscale: none this period (\(u.lastSkip))") }
@@ -4001,6 +4010,7 @@ final class Pipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         DispatchQueue.main.async { self.onStats?(stats) }
         holdMs.removeAll()
         frames = 0; mids = 0; lateMids = 0; lateOrig = 0; failed = 0; droppedMids = 0
+        if !(passing || fastSourceNoted) { seenLock.lock(); newPictures = 0; seenLock.unlock() }
         deliveryMs.removeAll(); readyMs.removeAll(); interpMs.removeAll(); procMs.removeAll()
         lastReport = now
     }

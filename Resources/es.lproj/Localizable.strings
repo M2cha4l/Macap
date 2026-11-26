@@ -59,7 +59,6 @@
 "Applied: " = "Aplicado: ";
 "The game runs at 60 fps. Passthrough on" = "El juego va a 60 fps. Directo activado";
 "The game runs at 30 fps. Interpolating" = "El juego va a 30 fps. Interpolando";
-"0 drops" = "0 perdidos";
 "%d drops" = "%d perdidos";
 "Settings" = "Ajustes";
 "Camera access needed" = "Se necesita acceso a la cámara";
@@ -158,3 +157,4 @@
 "Install failed. Staying on system capture" = "Error de instalación. Se mantiene la captura del sistema";
 "Press P for settings" = "Pulsa P para ver los ajustes";
 "Or move the mouse to show the Settings button" = "O mueve el ratón para ver el botón Ajustes";
+"%.0f Hz signal · %.0f fps new · %.0f ms" = "Señal %.0f Hz · %.0f fps nuevos · %.0f ms";

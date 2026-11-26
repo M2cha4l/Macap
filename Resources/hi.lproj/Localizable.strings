@@ -59,7 +59,6 @@
 "Applied: " = "लागू: ";
 "The game runs at 60 fps. Passthrough on" = "गेम 60 fps पर है। पासथ्रू चालू";
 "The game runs at 30 fps. Interpolating" = "गेम 30 fps पर है। इंटरपोलेशन चालू";
-"0 drops" = "0 ड्रॉप";
 "%d drops" = "%d ड्रॉप";
 "Settings" = "सेटिंग्स";
 "Camera access needed" = "कैमरा एक्सेस चाहिए";
@@ -158,3 +157,4 @@
 "Install failed. Staying on system capture" = "इंस्टॉल विफल। सिस्टम कैप्चर ही चालू है";
 "Press P for settings" = "सेटिंग्स के लिए P दबाएँ";
 "Or move the mouse to show the Settings button" = "या सेटिंग्स बटन देखने के लिए माउस हिलाएँ";
+"%.0f Hz signal · %.0f fps new · %.0f ms" = "%.0f Hz सिग्नल · %.0f fps नए · %.0f ms";

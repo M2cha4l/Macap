@@ -59,7 +59,6 @@
 "Applied: " = "تم التطبيق: ";
 "The game runs at 60 fps. Passthrough on" = "اللعبة تعمل بـ 60 fps. التمرير المباشر مفعّل";
 "The game runs at 30 fps. Interpolating" = "اللعبة تعمل بـ 30 fps. جارٍ استيفاء الإطارات";
-"0 drops" = "إطارات مفقودة: 0";
 "%d drops" = "إطارات مفقودة: %d";
 "Settings" = "الإعدادات";
 "Camera access needed" = "مطلوب إذن الكاميرا";
@@ -158,3 +157,4 @@
 "Install failed. Staying on system capture" = "فشل التثبيت. البقاء على التقاط النظام";
 "Press P for settings" = "اضغط P لفتح الإعدادات";
 "Or move the mouse to show the Settings button" = "أو حرّك الماوس لإظهار زر الإعدادات";
+"%.0f Hz signal · %.0f fps new · %.0f ms" = "إشارة %.0f Hz · %.0f fps جديدة · %.0f ms";
