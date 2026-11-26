@@ -12,7 +12,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="${1:-$REPO_ROOT/../Macap-public/dist}"
-DMG_NAME="Macap-v1.0.0-macOS-arm64.dmg"
+VERSION=$(sed -n 's|.*<key>CFBundleShortVersionString</key><string>\([^<]*\)</string>.*|\1|p' "$REPO_ROOT/build.sh")   # single source: build.sh
+DMG_NAME="Macap-v$VERSION-macOS-arm64.dmg"
 DMG_OUT="$DIST_DIR/$DMG_NAME"
 
 echo "==> [1/7] Running privacy guard self-test..."
@@ -72,8 +73,8 @@ mkdir -p "$STAGE_DIR" "$DIST_DIR"
 cp -R "$APP_PATH" "$STAGE_DIR/Macap.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 
-cat > "$STAGE_DIR/使用说明 README.txt" <<'TXT'
-Macap v1.0.0
+echo "Macap v$VERSION" > "$STAGE_DIR/使用说明 README.txt"
+cat >> "$STAGE_DIR/使用说明 README.txt" <<'TXT'
 
 需要 Apple Silicon Mac（M1 到 M5），macOS 14 或更新。
 Requires an Apple Silicon Mac (M1 to M5) with macOS 14 or later.
