@@ -486,6 +486,7 @@ final class SpatialUpscaler {
         guard target.w > inW && target.h > inH else { lastSkip = "target \(target.w)x\(target.h) not larger than \(inW)x\(inH)"; return nil }
         let t0 = CACurrentMediaTime()
         guard let device, let queue, let cache else { return fail("no Metal device") }
+        CVMetalTextureCacheFlush(cache, 0)
         if key != (inW, inH, target.w, target.h) {
             key = (inW, inH, target.w, target.h); scaler = nil; scaled = nil; pool = nil
             let d = MTLFXSpatialScalerDescriptor()

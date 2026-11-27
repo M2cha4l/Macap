@@ -409,6 +409,9 @@ public final class IFNetGraph {
                     current:  CVPixelBuffer,
                     output:   CVPixelBuffer,
                     timestep: Float = 0.5) throws {
+        // Capture and pool buffers keep arriving as new IOSurfaces, and the cache never forgets one by itself: after 1-2 hours
+        // each texture lookup cost several ms (Balanced crept from 24 to 43 ms, 2026-11-26). Flushing drops entries whose buffers are gone.
+        CVMetalTextureCacheFlush(textureCache, 0)
         pool.setTimestep(timestep)
         let verbose = ProcessInfo.processInfo.environment["RIFE_VERBOSE"] == "1"
         let dumpDir = ProcessInfo.processInfo.environment["RIFE_DUMP_DIR"]
@@ -913,6 +916,7 @@ public final class IFNetGraph {
                             featBufOut:    MTLBuffer,
                             imgIntBufOut:  MTLBuffer,
                             imgFullBufOut: MTLBuffer) throws {
+        CVMetalTextureCacheFlush(textureCache, 0)
         let queue = context.commandQueue
         let conv = context.conversionKernels
         let useInternalScale = internalScale != 1.0
@@ -1029,6 +1033,7 @@ public final class IFNetGraph {
                           prevImgFullBuf: MTLBuffer, currImgFullBuf: MTLBuffer,
                           timesteps:      [Float],
                           outputs:        [CVPixelBuffer]) throws {
+        CVMetalTextureCacheFlush(textureCache, 0)
         precondition(timesteps.count == outputs.count,
                      "timesteps and outputs must have matching counts")
         // 输出可以裁剪，但不得超出完整推理网格。
