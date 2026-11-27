@@ -26,7 +26,8 @@ CLEAN_SRC="$WORK_DIR/Macap-src"
 echo "==> [2/7] Exporting clean source tree into $CLEAN_SRC..."
 if [[ -d "$REPO_ROOT/ThirdParty/RifeMetal" && ! -d "$REPO_ROOT/public" ]]; then
     mkdir -p "$CLEAN_SRC"
-    rsync -a --exclude '.git' --exclude '.build' --exclude 'dist' --exclude '*.app' --exclude '*.dmg' --exclude '.DS_Store' "$REPO_ROOT/" "$CLEAN_SRC/"
+    # Tracked and new files only: ignored files (build logs, local samples) can hold user paths.
+    git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard | rsync -a --from0 --files-from=- "$REPO_ROOT/" "$CLEAN_SRC/"
 else
     "$REPO_ROOT/tools/make_public.sh" "$CLEAN_SRC"
 fi
